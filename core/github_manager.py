@@ -59,20 +59,31 @@ class GitHubManager:
         return self.work_dir
 
     def checkout_staging(self, create_if_missing: bool = True) -> None:
-        """Checkout staging branch, creating it from main/master if needed."""
+        """Align VPS with origin/staging, or create and push staging when absent."""
         cwd = self.work_dir
         self._run(["git", "fetch", "origin"], cwd=cwd)
 
-        if self._branch_exists_local(self.STAGING_BRANCH):
-            self._run(["git", "checkout", self.STAGING_BRANCH], cwd=cwd)
-            self._run(["git", "pull", "origin", self.STAGING_BRANCH], cwd=cwd, check=False)
-            return
+        staging_exists = (
+            self._branch_exists_local(self.STAGING_BRANCH)
+            or self._branch_exists_remote(self.STAGING_BRANCH)
+        )
 
-        if self._branch_exists_remote(self.STAGING_BRANCH):
-            self._run(
-                ["git", "checkout", "-b", self.STAGING_BRANCH, f"origin/{self.STAGING_BRANCH}"],
-                cwd=cwd,
-            )
+        if staging_exists:
+            if not self._branch_exists_local(self.STAGING_BRANCH):
+                self._run(
+                    ["git", "checkout", "-b", self.STAGING_BRANCH, f"origin/{self.STAGING_BRANCH}"],
+                    cwd=cwd,
+                )
+            else:
+                self._run(["git", "checkout", self.STAGING_BRANCH], cwd=cwd)
+
+            if self._branch_exists_remote(self.STAGING_BRANCH):
+                self._run(["git", "fetch", "origin"], cwd=cwd)
+                self._run(
+                    ["git", "reset", "--hard", f"origin/{self.STAGING_BRANCH}"],
+                    cwd=cwd,
+                )
+                logger.info("Aligned local staging with origin/%s", self.STAGING_BRANCH)
             return
 
         if not create_if_missing:
@@ -82,10 +93,12 @@ class GitHubManager:
             )
 
         base = self._default_base_branch()
-        logger.info("Creating staging branch from %s", base)
+        logger.info("Creating staging branch from %s and pushing to origin", base)
         self._run(["git", "checkout", base], cwd=cwd)
         self._run(["git", "pull", "origin", base], cwd=cwd, check=False)
         self._run(["git", "checkout", "-b", self.STAGING_BRANCH], cwd=cwd)
+        self._run(["git", "push", "-u", "origin", self.STAGING_BRANCH], cwd=cwd)
+        logger.info("Created and pushed origin/%s", self.STAGING_BRANCH)
 
     def stage_all_and_commit(self, message: str) -> bool:
         """Stage all changes and commit. Returns False if nothing to commit."""
@@ -194,7 +207,13 @@ class GitHubManager:
         check: bool = True,
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        logger.debug("Running: %s (cwd=%s)", " ".join(cmd), cwd)
+        cmd_str = " ".join(cmd)
+        cwd_str = str(cwd) if cwd else "(none)"
+        logger.info("Git command: %s | cwd=%s", cmd_str, cwd_str)
+
+        if not capture_output and check:
+            capture_output = True
+
         try:
             result = subprocess.run(
                 cmd,
@@ -205,22 +224,47 @@ class GitHubManager:
                 timeout=self.timeout_seconds,
             )
         except FileNotFoundError as exc:
+            logger.error(
+                "Git command failed (git not found): %s | cwd=%s",
+                cmd_str,
+                cwd_str,
+            )
             raise GitError(
                 "git executable not found — is Git installed?",
                 remediation="Install Git and ensure it is on your PATH.",
             ) from exc
         except subprocess.TimeoutExpired as exc:
+            logger.error(
+                "Git command timed out after %ss: %s | cwd=%s",
+                self.timeout_seconds,
+                cmd_str,
+                cwd_str,
+            )
             raise GitError(
-                f"Git command timed out after {self.timeout_seconds}s: {' '.join(cmd)}",
+                f"Git command timed out after {self.timeout_seconds}s: {cmd_str}",
                 remediation="Check network connectivity or increase timeout.",
             ) from exc
+
+        if result.returncode == 0:
+            logger.info("Git command succeeded (exit=0): %s | cwd=%s", cmd_str, cwd_str)
+        else:
+            stderr = (result.stderr or "").strip()
+            stdout = (result.stdout or "").strip()
+            logger.error(
+                "Git command failed (exit=%s): %s | cwd=%s | stderr=%s | stdout=%s",
+                result.returncode,
+                cmd_str,
+                cwd_str,
+                stderr or "(empty)",
+                stdout or "(empty)",
+            )
 
         if check and result.returncode != 0:
             stderr = result.stderr.strip() if capture_output else ""
             stdout = result.stdout.strip() if capture_output else ""
             detail = stderr or stdout or f"exit code {result.returncode}"
             raise GitError(
-                f"Git command failed: {' '.join(cmd)} — {detail}",
+                f"Git command failed: {cmd_str} — {detail}",
                 remediation="Inspect git output above and verify credentials/branch state.",
             )
 

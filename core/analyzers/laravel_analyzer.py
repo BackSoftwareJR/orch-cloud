@@ -153,7 +153,7 @@ class LaravelAnalyzer(BaseAnalyzer):
                 route_files.append(path)
 
         routes_dir = self.project_root / "routes"
-        if routes_dir.is_dir():
+        if routes_dir.exists() and routes_dir.is_dir():
             for path in routes_dir.glob("*.php"):
                 if path not in route_files:
                     route_files.append(path)

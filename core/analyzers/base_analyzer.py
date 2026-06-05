@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from core.models import AnalysisResult, FrameworkType
+from core.exceptions import ProjectNotInitializedError
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,19 @@ class BaseAnalyzer(ABC):
         """Return True when project_root exists and is a directory."""
         return self.project_root.is_dir()
 
+    def _require_project_root(self) -> None:
+        """Raise when project_root is missing (orchestrator paths that expect a clone)."""
+        if not self.project_root.exists():
+            raise ProjectNotInitializedError(
+                f"Project directory does not exist: {self.project_root}",
+                remediation="Run clone_or_update() or provide a valid work_dir before analysis.",
+            )
+        if not self.project_root.is_dir():
+            raise ProjectNotInitializedError(
+                f"Project path is not a directory: {self.project_root}",
+                remediation="Ensure work_dir points to the repository root.",
+            )
+
     def _missing_project_result(self, test_command: str) -> AnalysisResult:
         """Fallback when project_root is missing (e.g. dry-run without clone)."""
         return AnalysisResult(
@@ -56,7 +70,7 @@ class BaseAnalyzer(ABC):
 
     def _list_files(self, pattern: str, base: str = ".") -> list[str]:
         root = self.project_root / base
-        if not root.is_dir():
+        if not root.exists() or not root.is_dir():
             return []
         return sorted(str(p.relative_to(self.project_root)) for p in root.rglob(pattern))
 

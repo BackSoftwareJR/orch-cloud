@@ -37,6 +37,10 @@ class GitConflictError(GitError):
     """Merge/rebase conflict that cannot be auto-resolved."""
 
 
+class ProjectNotInitializedError(HyperOrchestratorError):
+    """Project repository or workspace directory is missing or not cloned yet."""
+
+
 class TaskPlanError(HyperOrchestratorError):
     """PRO-level task decomposition or validation failure."""
 

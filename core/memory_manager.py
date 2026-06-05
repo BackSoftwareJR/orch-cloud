@@ -9,6 +9,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from core.exceptions import ProjectNotInitializedError
 from core.models import LearnedPattern
 
 logger = logging.getLogger(__name__)
@@ -300,6 +301,11 @@ class MemoryManager:
         task: str = "",
     ) -> Path:
         """Append learned patterns to .cursorrules with structured sections."""
+        if not project_root.exists() or not project_root.is_dir():
+            raise ProjectNotInitializedError(
+                f"Cannot inject patterns — project directory missing: {project_root}",
+                remediation="Clone the repository before modifying .cursorrules.",
+            )
         cursorrules_path = project_root / ".cursorrules"
         existing = ""
         if cursorrules_path.is_file():

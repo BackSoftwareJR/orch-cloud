@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,7 +12,7 @@ import docker
 from docker.errors import DockerException, ImageNotFound, NotFound
 from docker.models.containers import Container
 
-from core.exceptions import DockerOrchestratorError
+from core.exceptions import DockerOrchestratorError, ProjectNotInitializedError
 from core.log_parser import extract_progress_events, is_agent_success
 from core.retry import retry_with_backoff
 from core.security import check_ssh_key_permissions, redact_secrets
@@ -98,8 +99,9 @@ class DockerController:
         project_root = project_root.resolve()
 
         if not project_root.is_dir():
-            raise ValueError(
-                f"Project root does not exist: {project_root}",
+            raise ProjectNotInitializedError(
+                f"Project root does not exist or is not a directory: {project_root}",
+                remediation="Clone the repository before running the agent container.",
             )
 
         volumes = self._build_volumes(project_root)
@@ -182,6 +184,13 @@ class DockerController:
         """Run an arbitrary command in the same base image (e.g. tests)."""
         self.ensure_base_image()
         project_root = project_root.resolve()
+
+        if not project_root.is_dir():
+            raise ProjectNotInitializedError(
+                f"Project root does not exist or is not a directory: {project_root}",
+                remediation="Clone the repository before running container commands.",
+            )
+
         volumes = self._build_volumes(project_root)
 
         if isinstance(command, list):
@@ -249,14 +258,20 @@ class DockerController:
             return ""
 
     def _build_volumes(self, project_root: Path) -> dict[str, dict[str, str]]:
+        # On RHEL/CentOS/Fedora with SELinux enforcing, bind mounts need the :z
+        # label so container processes can read/write host paths. Set
+        # DOCKER_SELINUX_Z=true to force :z, false to disable, or leave unset to
+        # auto-detect SELinux enforcement via /sys/fs/selinux/enforce.
+        mount_mode = self._bind_mount_mode("rw")
+
         volumes: dict[str, dict[str, str]] = {
-            str(project_root): {"bind": "/workspace", "mode": "rw"},
+            str(project_root): {"bind": "/workspace", "mode": mount_mode},
         }
 
         if self.agent_env_path.is_file():
             volumes[str(self.agent_env_path.resolve())] = {
                 "bind": "/workspace/.env",
-                "mode": "ro",
+                "mode": self._bind_mount_mode("ro"),
             }
         else:
             logger.warning(
@@ -267,12 +282,18 @@ class DockerController:
         if self.ssh_dir.is_dir():
             volumes[str(self.ssh_dir.resolve())] = {
                 "bind": "/root/.ssh",
-                "mode": "ro",
+                "mode": self._bind_mount_mode("ro"),
             }
         else:
             logger.warning("SSH directory %s not found — git push may fail", self.ssh_dir)
 
         return volumes
+
+    @staticmethod
+    def _bind_mount_mode(base_mode: str) -> str:
+        if _selinux_z_enabled():
+            return f"{base_mode},z"
+        return base_mode
 
     @staticmethod
     def _build_agent_command(prompt: str, *, model: str, yolo: bool) -> list[str]:
@@ -317,3 +338,23 @@ class DockerController:
             return True
         except DockerException:
             return False
+
+
+def _selinux_z_enabled() -> bool:
+    """Return whether Docker bind mounts should use the SELinux :z label."""
+    env = os.environ.get("DOCKER_SELINUX_Z", "").strip().lower()
+    if env in {"1", "true", "yes", "on"}:
+        return True
+    if env in {"0", "false", "no", "off"}:
+        return False
+    return _is_selinux_enforcing()
+
+
+def _is_selinux_enforcing() -> bool:
+    enforce_path = Path("/sys/fs/selinux/enforce")
+    if enforce_path.is_file():
+        try:
+            return enforce_path.read_text(encoding="utf-8").strip() == "1"
+        except OSError:
+            return False
+    return False

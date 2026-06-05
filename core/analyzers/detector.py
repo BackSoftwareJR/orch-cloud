@@ -66,6 +66,18 @@ def select_analyzer(project_root: Path) -> BaseAnalyzer:
 
 
 def _collect_signals(root: Path) -> dict[str, bool]:
+    if not root.exists() or not root.is_dir():
+        return {
+            "composer_json": False,
+            "artisan": False,
+            "bootstrap_app": False,
+            "package_json": False,
+            "next_config": False,
+            "app_router_dir": False,
+            "pages_router_dir": False,
+            "next_dependency": False,
+        }
+
     has_composer = (root / "composer.json").is_file()
     has_artisan = (root / "artisan").is_file()
     has_bootstrap = (root / "bootstrap" / "app.php").is_file()

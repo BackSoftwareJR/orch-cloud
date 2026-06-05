@@ -139,6 +139,8 @@ class NextJsAnalyzer(BaseAnalyzer):
         return "unknown", []
 
     def _scan_app_router(self, base: Path) -> list[dict[str, str]]:
+        if not base.exists() or not base.is_dir():
+            return []
         routes: list[dict[str, str]] = []
         for page in sorted(base.rglob("page.*")):
             if page.suffix not in {".tsx", ".ts", ".jsx", ".js"}:
@@ -159,6 +161,8 @@ class NextJsAnalyzer(BaseAnalyzer):
         return routes
 
     def _scan_pages_router(self, base: Path) -> list[dict[str, str]]:
+        if not base.exists() or not base.is_dir():
+            return []
         routes: list[dict[str, str]] = []
         for page in sorted(base.rglob("*")):
             if not page.is_file():
@@ -195,12 +199,13 @@ class NextJsAnalyzer(BaseAnalyzer):
         api_dir = self.project_root / "pages" / "api"
         src_api = self.project_root / "src" / "pages" / "api"
         for base in (api_dir, src_api):
-            if base.is_dir():
-                for f in sorted(base.rglob("*")):
-                    if f.is_file() and f.suffix in {".ts", ".tsx", ".js", ".jsx"}:
-                        rel = str(f.relative_to(self.project_root))
-                        if rel not in api_paths:
-                            api_paths.append(rel)
+            if not base.exists() or not base.is_dir():
+                continue
+            for f in sorted(base.rglob("*")):
+                if f.is_file() and f.suffix in {".ts", ".tsx", ".js", ".jsx"}:
+                    rel = str(f.relative_to(self.project_root))
+                    if rel not in api_paths:
+                        api_paths.append(rel)
         return api_paths[:30]
 
     def _parse_tsconfig_paths(self) -> dict[str, list[str]]:
