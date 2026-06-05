@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.hyper-orchestrator/
+*.db
+.env
+agent.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+.DS_Store
