@@ -7,6 +7,12 @@ __pycache__/
 .env
 agent.env
 
+# Dashboard
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+dashboard/.env.local
+
 # IDE
 .idea/
 .vscode/

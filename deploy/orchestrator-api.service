@@ -1,5 +1,5 @@
 [Unit]
-Description=HyperOrchestrator API Gateway
+Description=HyperOrchestrator Platform API
 After=network.target
 
 [Service]

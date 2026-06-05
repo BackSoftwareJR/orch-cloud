@@ -186,87 +186,112 @@ Enable verbose JSON logs for production debugging:
 hyper-orchestrator --repo <url> --task "..." --level medium --json-log -v
 ```
 
-## API Gateway
+## Platform API & Dashboard
 
-An optional FastAPI webhook server (`api_gateway.py`) queues orchestration jobs via HTTP and returns immediately while the CLI runs in the background.
+HyperOrchestrator includes an H24 multi-project orchestration platform: a FastAPI backend with SQLite persistence, a background job worker, WebSocket log streaming, and a Next.js dashboard.
 
-```bash
-pip install -r requirements.txt
-uvicorn api_gateway:app --host 0.0.0.0 --port 8000
+### Architecture
+
+```mermaid
+flowchart LR
+    Dashboard[Next.js Dashboard] -->|REST| API[FastAPI api_gateway]
+    Dashboard -->|WebSocket| WS[/ws/logs/job_id]
+    API --> DB[(orchestrator.db)]
+    Worker[Async Job Worker] --> DB
+    Worker --> CLI[hyper-orchestrator CLI]
+    CLI --> Docker[Docker Agents]
 ```
 
-### Endpoints
+```
+server/
+├── app.py              FastAPI app + lifespan (starts worker)
+├── config.py           Environment settings
+├── database.py         SQLAlchemy engine + sessions
+├── models.py           Project + Job ORM models
+├── schemas.py          Pydantic API schemas
+├── worker.py           Async queue worker (MAX_CONCURRENT_JOBS)
+├── orchestrator.py     CLI subprocess helpers
+└── routers/
+    ├── health.py       GET /health
+    ├── projects.py     Projects CRUD
+    ├── jobs.py         Jobs list/get/trigger
+    ├── webhook.py      POST /webhook/trigger-task (backward compatible)
+    └── ws.py           WebSocket log streaming
+dashboard/              Next.js App Router UI
+deploy/                 systemd units + env template
+```
+
+### Run locally
+
+**Backend:**
+
+```bash
+cd "/path/to/orchestratore cloud"
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt && pip install -e .
+uvicorn api_gateway:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**Dashboard:**
+
+```bash
+cd dashboard
+cp .env.local.example .env.local   # set NEXT_PUBLIC_API_URL=http://localhost:8000
+npm install
+npm run dev                        # http://localhost:3000
+```
+
+### REST API
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/health` | No | Liveness check |
-| POST | `/webhook/trigger-task` | Yes | Queue a new orchestration job |
-| GET | `/jobs/{job_id}` | Yes | Job status and log tail |
+| GET | `/health` | No | Liveness + worker stats |
+| GET/POST/PATCH/DELETE | `/projects` | No | Projects CRUD |
+| GET | `/jobs` | No | List jobs (`?project_id=&status=`) |
+| GET | `/jobs/{job_id}` | No | Job detail + log tail |
+| POST | `/projects/{id}/jobs` | No | Queue task for project |
+| POST | `/webhook/trigger-task` | Yes | Webhook trigger (auto-creates project) |
+| GET | `/jobs/{job_id}/legacy` | Yes | Backward-compatible status format |
+| WS | `/ws/logs/{job_id}` | No | Live log stream |
 
-### Authentication
+### Authentication (webhook)
 
-Set `ORCHESTRATOR_API_TOKEN` or `WEBHOOK_TOKEN` in the environment. A dev-only default (`dev-orchestrator-token-change-me`) is used when neither is set — **always override in production**.
+Set `ORCHESTRATOR_API_TOKEN` or `WEBHOOK_TOKEN`. Pass via `Authorization: Bearer <token>` or `X-API-Token`.
 
-Pass the token via:
+### Environment
 
-- `Authorization: Bearer <token>`
-- `X-API-Token: <token>`
+See `deploy/orchestrator.env.example` for `DATABASE_URL`, `MAX_CONCURRENT_JOBS`, `CORS_ORIGINS`, and `NEXT_PUBLIC_API_URL`.
 
-### Example
+Job logs: `~/.hyper-orchestrator/jobs/{job_id}.log` · Database: `orchestrator.db`
 
-```bash
-curl -X POST http://localhost:8000/webhook/trigger-task \
-  -H "Authorization: Bearer your-token-here" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repo_url": "https://github.com/org/my-app.git",
-    "task": "Fix N+1 query on users index",
-    "level": "medium"
-  }'
-```
-
-Response:
-
-```json
-{"job_id": "550e8400-e29b-41d4-a716-446655440000", "status": "queued"}
-```
-
-Job logs are written to `~/.hyper-orchestrator/jobs/{job_id}.log`.
-
-### Systemd
-
-Copy `deploy/orchestrator-api.service` to `/etc/systemd/system/`, set `ORCHESTRATOR_API_TOKEN` in `/opt/orch-cloud/.env`, then:
+### Systemd (VPS)
 
 ```bash
+sudo cp deploy/orchestrator-api.service deploy/orchestrator-dashboard.service /etc/systemd/system/
+sudo cp deploy/orchestrator.env.example /opt/orch-cloud/.env   # edit secrets
+cd /opt/orch-cloud/dashboard && npm install && npm run build
 sudo systemctl daemon-reload
-sudo systemctl enable --now orchestrator-api
+sudo systemctl enable --now orchestrator-api orchestrator-dashboard
 ```
 
 ## VPS Deployment Guide
 
-1. **Provision** — Ubuntu 22.04+ VPS with 4GB+ RAM, Docker installed
-2. **Clone orchestrator** — `git clone <repo> && cd orchestratore-cloud && pip install -e .`
-3. **Build base image** — `docker build -t hyper-agent-base .`
-4. **Configure secrets**:
-   ```bash
-   sudo mkdir -p /opt/agent-orchestrator/config
-   echo "CURSOR_API_KEY=..." | sudo tee /opt/agent-orchestrator/config/agent.env
-   export OPENAI_API_KEY=sk-...   # add to /etc/environment or .bashrc
-   ```
-5. **SSH for git push** — Deploy key with `chmod 600`, add to GitHub repo
-6. **Run** — Use `tmux` or `systemd` for long PRO runs:
-   ```bash
-   hyper-orchestrator --repo https://github.com/org/app.git \
-     --task "Implement feature X" --level pro --json-log
-   ```
-7. **Monitor** — Check `~/.hyper-orchestrator/reports/run-*.json` for correlation IDs and outcomes
+1. **Provision** — Ubuntu 22.04+ VPS with 4GB+ RAM, Docker, Node.js 20+
+2. **Clone orchestrator** — `git clone https://github.com/BackSoftwareJR/orch-cloud /opt/orch-cloud`
+3. **Install backend** — `cd /opt/orch-cloud && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e .`
+4. **Build dashboard** — `cd dashboard && npm install && npm run build`
+5. **Build base image** — `docker build -t hyper-agent-base .`
+6. **Configure secrets** — Copy `deploy/orchestrator.env.example` to `.env`; set API token, `OPENAI_API_KEY`, Cursor key at `/opt/agent-orchestrator/config/agent.env`
+7. **SSH for git push** — Deploy key with `chmod 600`, add to GitHub repos
+8. **Enable services** — `systemctl enable --now orchestrator-api orchestrator-dashboard`
+9. **Monitor** — Dashboard at `:3000`, API at `:8000`; reports in `~/.hyper-orchestrator/reports/`
 
 ## Tests
 
 ```bash
 pip install pytest
 pytest tests/ -v
-python -m py_compile core/*.py core/analyzers/*.py
+python -m py_compile core/*.py core/analyzers/*.py server/*.py server/routers/*.py
 ```
 
 ## License
