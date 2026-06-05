@@ -26,6 +26,9 @@ class LaravelAnalyzer(BaseAnalyzer):
         )
 
     def analyze(self) -> AnalysisResult:
+        if not self._project_root_ready():
+            return self._missing_project_result("php artisan test")
+
         composer = self._parse_composer()
         migrations = self._map_migrations()
         routes = self._identify_routes()

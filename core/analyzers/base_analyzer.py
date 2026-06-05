@@ -28,6 +28,22 @@ class BaseAnalyzer(ABC):
     def analyze(self) -> AnalysisResult:
         """Produce structured analysis for the project."""
 
+    def _project_root_ready(self) -> bool:
+        """Return True when project_root exists and is a directory."""
+        return self.project_root.is_dir()
+
+    def _missing_project_result(self, test_command: str) -> AnalysisResult:
+        """Fallback when project_root is missing (e.g. dry-run without clone)."""
+        return AnalysisResult(
+            framework=self.framework,
+            summary=self.format_markdown_section(
+                "Project Unavailable",
+                "Project directory does not exist or is not accessible yet.",
+            ),
+            details={"test_command": test_command},
+            confidence=0.0,
+        )
+
     def _read_text(self, relative_path: str) -> str | None:
         path = self.project_root / relative_path
         if not path.is_file():

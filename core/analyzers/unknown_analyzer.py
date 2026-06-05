@@ -18,6 +18,9 @@ class UnknownAnalyzer(BaseAnalyzer):
         return True
 
     def analyze(self) -> AnalysisResult:
+        if not self._project_root_ready():
+            return self._missing_project_result("npm run test")
+
         files = sorted(
             p.name
             for p in self.project_root.iterdir()

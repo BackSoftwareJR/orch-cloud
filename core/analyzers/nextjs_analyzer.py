@@ -35,6 +35,9 @@ class NextJsAnalyzer(BaseAnalyzer):
         return "next" in deps or "next" in dev_deps
 
     def analyze(self) -> AnalysisResult:
+        if not self._project_root_ready():
+            return self._missing_project_result("npm run test")
+
         package = self._parse_package_json()
         router_type, routes = self._map_router_structure()
         scripts = package.get("scripts", {})

@@ -10,6 +10,7 @@ import pytest
 from core.analyzers.detector import detect_framework
 from core.analyzers.laravel_analyzer import LaravelAnalyzer
 from core.analyzers.nextjs_analyzer import NextJsAnalyzer
+from core.analyzers.unknown_analyzer import UnknownAnalyzer
 
 
 @pytest.fixture
@@ -88,6 +89,28 @@ def test_nextjs_analyzer_detects_vitest(nextjs_project: Path) -> None:
     assert "Vitest" in result.summary
     assert "middleware.ts" in result.summary
     assert result.details["test_command"] == "npm run test"
+
+
+@pytest.mark.parametrize(
+    ("analyzer_cls", "framework", "test_command"),
+    [
+        (UnknownAnalyzer, "unknown", "npm run test"),
+        (LaravelAnalyzer, "laravel", "php artisan test"),
+        (NextJsAnalyzer, "nextjs", "npm run test"),
+    ],
+)
+def test_analyzer_missing_project_root_returns_empty_fallback(
+    tmp_path: Path,
+    analyzer_cls: type,
+    framework: str,
+    test_command: str,
+) -> None:
+    missing_root = tmp_path / "not-cloned-yet"
+    result = analyzer_cls(missing_root).analyze()
+    assert result.framework == framework
+    assert result.confidence == 0.0
+    assert result.details["test_command"] == test_command
+    assert "Project Unavailable" in result.summary
 
 
 def test_framework_detector_confidence(laravel_project: Path, nextjs_project: Path) -> None:
