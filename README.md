@@ -186,6 +186,62 @@ Enable verbose JSON logs for production debugging:
 hyper-orchestrator --repo <url> --task "..." --level medium --json-log -v
 ```
 
+## API Gateway
+
+An optional FastAPI webhook server (`api_gateway.py`) queues orchestration jobs via HTTP and returns immediately while the CLI runs in the background.
+
+```bash
+pip install -r requirements.txt
+uvicorn api_gateway:app --host 0.0.0.0 --port 8000
+```
+
+### Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health` | No | Liveness check |
+| POST | `/webhook/trigger-task` | Yes | Queue a new orchestration job |
+| GET | `/jobs/{job_id}` | Yes | Job status and log tail |
+
+### Authentication
+
+Set `ORCHESTRATOR_API_TOKEN` or `WEBHOOK_TOKEN` in the environment. A dev-only default (`dev-orchestrator-token-change-me`) is used when neither is set — **always override in production**.
+
+Pass the token via:
+
+- `Authorization: Bearer <token>`
+- `X-API-Token: <token>`
+
+### Example
+
+```bash
+curl -X POST http://localhost:8000/webhook/trigger-task \
+  -H "Authorization: Bearer your-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_url": "https://github.com/org/my-app.git",
+    "task": "Fix N+1 query on users index",
+    "level": "medium"
+  }'
+```
+
+Response:
+
+```json
+{"job_id": "550e8400-e29b-41d4-a716-446655440000", "status": "queued"}
+```
+
+Job logs are written to `~/.hyper-orchestrator/jobs/{job_id}.log`.
+
+### Systemd
+
+Copy `deploy/orchestrator-api.service` to `/etc/systemd/system/`, set `ORCHESTRATOR_API_TOKEN` in `/opt/orch-cloud/.env`, then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now orchestrator-api
+```
+
 ## VPS Deployment Guide
 
 1. **Provision** — Ubuntu 22.04+ VPS with 4GB+ RAM, Docker installed
