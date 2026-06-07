@@ -58,6 +58,15 @@ def test_execute_agent_accepts_x_api_key(api_client: TestClient) -> None:
     assert body["orchestrator_job_id"] == body["run_id"]
 
 
+def test_execute_agent_accepts_quoted_x_api_key(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/api/v1/execute-agent",
+        json=_execute_payload(),
+        headers={"X-API-Key": '"n8n-test-key"'},
+    )
+    assert response.status_code == 200
+
+
 def test_execute_agent_maps_frontend_to_ux_preset(api_client: TestClient) -> None:
     response = api_client.post(
         "/api/v1/execute-agent",
