@@ -21,3 +21,4 @@ dashboard/.env.local
 *~
 
 .DS_Store
+dashboard/next-env.d.ts
