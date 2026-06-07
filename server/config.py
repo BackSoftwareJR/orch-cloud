@@ -35,6 +35,6 @@ def get_max_concurrent_jobs() -> int:
 def get_cors_origins() -> list[str]:
     raw = os.environ.get(
         "CORS_ORIGINS",
-        "http://localhost:3000,http://127.0.0.1:3000",
+        "http://localhost:3000,http://127.0.0.1:3000,http://2.24.15.210:3000",
     )
     return [origin.strip() for origin in raw.split(",") if origin.strip()]

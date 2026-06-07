@@ -9,6 +9,7 @@ import type {
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  console.log("Fetching from:", process.env.NEXT_PUBLIC_API_URL ?? API_URL);
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
