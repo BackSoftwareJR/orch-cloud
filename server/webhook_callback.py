@@ -69,6 +69,19 @@ def _post_webhook_sync(url: str, payload: dict[str, Any]) -> None:
             raise urllib.error.HTTPError(url, response.status, "Webhook rejected", response.headers, None)
 
 
+async def notify_job_finished_with_payload(
+    url: str,
+    payload: dict[str, Any],
+    job_id: str,
+) -> None:
+    """Fire-and-forget callback using a pre-built payload (safe after DB session closes)."""
+    try:
+        await asyncio.to_thread(_post_webhook_sync, url, payload)
+        logger.info("Webhook delivered for job %s → %s", job_id[:8], url)
+    except Exception:
+        logger.exception("Webhook delivery failed for job %s → %s", job_id[:8], url)
+
+
 async def notify_job_finished(job: Job, project: Project) -> None:
     """Fire-and-forget callback when a job reaches a terminal state."""
     url = _resolve_webhook_url(project)
@@ -78,18 +91,17 @@ async def notify_job_finished(job: Job, project: Project) -> None:
         return
 
     payload = build_callback_payload(job, project)
-
-    try:
-        await asyncio.to_thread(_post_webhook_sync, url, payload)
-        logger.info("Webhook delivered for job %s → %s", job.job_id[:8], url)
-    except Exception:
-        logger.exception("Webhook delivery failed for job %s → %s", job.job_id[:8], url)
+    await notify_job_finished_with_payload(url, payload, job.job_id)
 
 
 def schedule_job_webhook(job: Job, project: Project) -> None:
     """Schedule async webhook from sync worker context."""
+    url = _resolve_webhook_url(project)
+    if not url or job.status not in EVENT_MAP:
+        return
+    payload = build_callback_payload(job, project)
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(notify_job_finished(job, project))
+        loop.create_task(notify_job_finished_with_payload(url, payload, job.job_id))
     except RuntimeError:
-        asyncio.run(notify_job_finished(job, project))
+        asyncio.run(notify_job_finished_with_payload(url, payload, job.job_id))

@@ -59,13 +59,33 @@ cd "$ROOT_DIR"
 echo "==> Building Docker agent image (hyper-agent-base)..."
 docker build -t hyper-agent-base .
 
+install_systemd_unit() {
+  local unit="$1"
+  local src="$ROOT_DIR/deploy/$unit"
+  local dst="/etc/systemd/system/$unit"
+  if [[ ! -f "$src" ]]; then
+    echo "WARNING: missing unit file $src"
+    return
+  fi
+  # VPS may symlink /etc/systemd/system/*.service → repo deploy/; cp then exits 1 and aborts deploy.
+  if [[ -e "$dst" ]] && [[ "$(readlink -f "$src")" == "$(readlink -f "$dst")" ]]; then
+    echo "==> systemd unit already in place: $unit"
+    return
+  fi
+  sudo cp "$src" "$dst"
+}
+
 echo "==> Installing systemd unit files..."
-sudo cp "$ROOT_DIR/deploy/orchestrator-api.service" "$ROOT_DIR/deploy/orchestrator-dashboard.service" /etc/systemd/system/
+install_systemd_unit orchestrator-api.service
+install_systemd_unit orchestrator-dashboard.service
 
 echo "==> Reloading systemd units (pick up any unit file changes)..."
 sudo systemctl daemon-reload
 
 echo "==> Restarting services..."
-sudo systemctl start orchestrator-api orchestrator-dashboard
+sudo systemctl restart orchestrator-api orchestrator-dashboard
+
+echo "==> Service status:"
+sudo systemctl is-active orchestrator-api orchestrator-dashboard || true
 
 echo "==> Deploy complete."

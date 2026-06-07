@@ -15,7 +15,7 @@ from server.database import SessionLocal
 from server.job_service import add_system_message, record_job_outcome
 from server.models import Job, JobStatus, Project
 from server.orchestrator import build_command, job_log_path, write_log_header
-from server.webhook_callback import notify_job_finished
+from server.webhook_callback import build_callback_payload, notify_job_finished_with_payload
 
 logger = logging.getLogger(__name__)
 
@@ -134,13 +134,20 @@ async def _run_subprocess(
                     error_message=job.error_message,
                 )
             project = db.query(Project).filter(Project.id == job.project_id).one_or_none()
-            db.commit()
+            webhook_payload: tuple[str, dict] | None = None
             if project and job.status in {
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.CANCELLED,
             }:
-                asyncio.create_task(notify_job_finished(job, project))
+                settings = project.settings or {}
+                url = settings.get("webhook_url")
+                if isinstance(url, str) and url.strip():
+                    webhook_payload = (url.strip(), build_callback_payload(job, project))
+            db.commit()
+            if webhook_payload is not None:
+                url, payload = webhook_payload
+                asyncio.create_task(notify_job_finished_with_payload(url, payload, job.job_id))
         finally:
             db.close()
             _running_job_ids.discard(job_id)
