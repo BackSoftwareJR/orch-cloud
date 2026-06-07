@@ -70,6 +70,27 @@ class DockerController:
                 remediation=f"Build it with: docker build -t {self.base_image} .",
             ) from exc
 
+    def verify_agent_binary(self) -> None:
+        """Confirm cursor-agent is installed and on PATH inside the base image."""
+        self.ensure_base_image()
+        try:
+            output = self.client.containers.run(
+                self.base_image,
+                command=[AGENT_BINARY, "--version"],
+                remove=True,
+                detach=False,
+            )
+            version = output.decode("utf-8", errors="replace").strip()
+            logger.debug("%s available in image: %s", AGENT_BINARY, version)
+        except DockerException as exc:
+            raise DockerOrchestratorError(
+                f"Image '{self.base_image}' is missing '{AGENT_BINARY}' on PATH.",
+                remediation=(
+                    f"Rebuild the agent image: docker build -t {self.base_image} . "
+                    "(see Dockerfile in project root)."
+                ),
+            ) from exc
+
     def validate_mounts(self) -> list[str]:
         """Return warnings about mount configuration."""
         warnings: list[str] = []
@@ -108,51 +129,67 @@ class DockerController:
         command = self._build_agent_command(prompt, model=model, yolo=yolo)
 
         env = {"CURSOR_AGENT_MODEL": model}
+        env.update(self._parse_env_file(self.agent_env_path))
         if extra_env:
             env.update(extra_env)
 
-        container_name = f"hyper-agent-{int(time.time())}"
+        run_id = int(time.time())
         logger.info(
-            "Starting container %s (model=%s, yolo=%s)",
-            container_name,
+            "Starting agent container run-%s (model=%s, yolo=%s)",
+            run_id,
             model,
             yolo,
         )
 
         start = time.monotonic()
         container: Container | None = None
+        attempt = 0
 
         def _run_container() -> ContainerRunResult:
-            nonlocal container
-            container = self.client.containers.run(
-                self.base_image,
-                command=command,
-                name=container_name,
-                volumes=volumes,
-                working_dir=working_dir,
-                environment=env,
-                detach=True,
-                remove=False,
-                network_mode=self.network_mode,
-            )
-            exit_code = self._wait_with_progress(container, timeout_seconds)
-            logs = container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
-            duration = time.monotonic() - start
-            success = is_agent_success(logs, int(exit_code))
-            logger.info(
-                "Container %s finished exit=%d success=%s in %.1fs",
-                container.short_id,
-                exit_code,
-                success,
-                duration,
-            )
-            return ContainerRunResult(
-                exit_code=int(exit_code),
-                logs=logs,
-                container_id=container.id,
-                duration_seconds=duration,
-                success=success,
-            )
+            nonlocal container, attempt
+            attempt += 1
+            container_name = f"hyper-agent-{run_id}-a{attempt}"
+            logger.info("Launching container %s", container_name)
+
+            try:
+                container = self.client.containers.run(
+                    self.base_image,
+                    command=command,
+                    name=container_name,
+                    volumes=volumes,
+                    working_dir=working_dir,
+                    environment=env,
+                    detach=True,
+                    remove=False,
+                    network_mode=self.network_mode,
+                )
+            except DockerException:
+                self._remove_container_by_name(container_name)
+                raise
+
+            try:
+                exit_code = self._wait_with_progress(container, timeout_seconds)
+                logs = container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
+                duration = time.monotonic() - start
+                success = is_agent_success(logs, int(exit_code))
+                logger.info(
+                    "Container %s finished exit=%d success=%s in %.1fs",
+                    container.short_id,
+                    exit_code,
+                    success,
+                    duration,
+                )
+                return ContainerRunResult(
+                    exit_code=int(exit_code),
+                    logs=logs,
+                    container_id=container.id,
+                    duration_seconds=duration,
+                    success=success,
+                )
+            finally:
+                if container is not None:
+                    self._cleanup_container(container)
+                    container = None
 
         try:
             return retry_with_backoff(
@@ -162,16 +199,7 @@ class DockerController:
                 retryable=(DockerException,),
             )
         except Exception:
-            if container is not None:
-                try:
-                    logs = container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
-                    logger.error("Container logs on failure:\n%s", redact_secrets(logs[-4000:]))
-                except DockerException:
-                    pass
             raise
-        finally:
-            if container is not None:
-                self._cleanup_container(container)
 
     def run_command(
         self,
@@ -308,6 +336,33 @@ class DockerController:
             container.remove(force=True)
         except DockerException as exc:
             logger.warning("Failed to remove container %s: %s", container.short_id, exc)
+
+    def _remove_container_by_name(self, name: str) -> None:
+        try:
+            stale = self.client.containers.get(name)
+            stale.remove(force=True)
+            logger.info("Removed stale container %s", name)
+        except NotFound:
+            pass
+        except DockerException as exc:
+            logger.warning("Failed to remove stale container %s: %s", name, exc)
+
+    @staticmethod
+    def _parse_env_file(path: Path) -> dict[str, str]:
+        if not path.is_file():
+            return {}
+
+        env: dict[str, str] = {}
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key:
+                env[key] = value
+        return env
 
     def close(self) -> None:
         if self._client is not None:

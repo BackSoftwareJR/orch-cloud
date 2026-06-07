@@ -60,6 +60,33 @@ else
 fi
 echo
 
+echo "==> Docker agent image:"
+if docker image inspect hyper-agent-base >/dev/null 2>&1; then
+  if docker run --rm hyper-agent-base cursor-agent --version >/dev/null 2>&1; then
+    echo "  OK — hyper-agent-base with cursor-agent"
+    docker run --rm hyper-agent-base cursor-agent --version 2>/dev/null | head -1 | sed 's/^/  /'
+  else
+    echo "  FAIL — hyper-agent-base exists but cursor-agent is missing"
+    echo "  Fix: cd /opt/orch-cloud && docker build -t hyper-agent-base ."
+  fi
+else
+  echo "  FAIL — hyper-agent-base image not built"
+  echo "  Fix: cd /opt/orch-cloud && docker build -t hyper-agent-base ."
+fi
+echo
+
+echo "==> Agent env file:"
+if [[ -f /opt/agent-orchestrator/config/agent.env ]]; then
+  if grep -q '^CURSOR_API_KEY=' /opt/agent-orchestrator/config/agent.env; then
+    echo "  OK — CURSOR_API_KEY set in agent.env"
+  else
+    echo "  WARNING — agent.env exists but CURSOR_API_KEY is missing"
+  fi
+else
+  echo "  WARNING — /opt/agent-orchestrator/config/agent.env not found"
+fi
+echo
+
 echo "==> GitHub auth check:"
 if [[ -n "${GITHUB_TOKEN:-}" || -n "${GH_TOKEN:-}" ]]; then
   echo "  GITHUB_TOKEN/GH_TOKEN is set"

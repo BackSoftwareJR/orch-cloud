@@ -32,6 +32,9 @@ export INTERNAL_API_URL
 npm run build
 cd "$ROOT_DIR"
 
+echo "==> Building Docker agent image (hyper-agent-base)..."
+docker build -t hyper-agent-base .
+
 echo "==> Restarting services..."
 sudo systemctl start orchestrator-api orchestrator-dashboard
 

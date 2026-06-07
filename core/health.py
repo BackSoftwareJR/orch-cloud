@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core.docker_controller import DockerController
+from core.docker_controller import AGENT_BINARY, DockerController
 from core.exceptions import HealthCheckError
 from core.security import check_ssh_key_permissions, validate_repo_url
 
@@ -80,10 +80,12 @@ def run_preflight_checks(
     else:
         fail("Docker daemon reachable", "Docker is not running or not accessible")
 
-    # Base image
+    # Base image + cursor-agent binary
     try:
         docker.ensure_base_image()
         ok(f"Docker image '{docker.base_image}' available")
+        docker.verify_agent_binary()
+        ok(f"'{AGENT_BINARY}' available in base image")
     except Exception as exc:
         fail(f"Docker image '{docker.base_image}'", str(exc))
 
