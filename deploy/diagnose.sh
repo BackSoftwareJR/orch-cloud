@@ -60,4 +60,17 @@ else
 fi
 echo
 
+echo "==> GitHub auth check:"
+if [[ -n "${GITHUB_TOKEN:-}" || -n "${GH_TOKEN:-}" ]]; then
+  echo "  GITHUB_TOKEN/GH_TOKEN is set"
+elif [[ -f "${GITHUB_SSH_KEY_PATH:-$HOME/.ssh/orchestrator_deploy_key}" ]]; then
+  echo "  Deploy key found at ${GITHUB_SSH_KEY_PATH:-$HOME/.ssh/orchestrator_deploy_key}"
+elif [[ -f "$HOME/.ssh/id_ed25519" || -f "$HOME/.ssh/id_rsa" ]]; then
+  echo "  Default SSH key found — ensure it has access to private repos"
+else
+  echo "  WARNING: no GITHUB_TOKEN or SSH deploy key — private repo clones will fail"
+  echo "  Run: deploy/setup-github-deploy-key.sh"
+fi
+echo
+
 echo "=== Done ==="

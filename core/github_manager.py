@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from core.exceptions import GitConflictError, GitError
+from core.git_auth import git_auth_remediation, git_subprocess_env, resolve_git_repo_url
 from core.retry import retry_with_backoff
 from core.security import validate_repo_url
 
@@ -28,13 +29,15 @@ class GitHubManager:
         *,
         timeout_seconds: int = DEFAULT_GIT_TIMEOUT,
     ) -> None:
-        self.repo_url = validate_repo_url(repo_url.strip())
+        self.display_repo_url = validate_repo_url(repo_url.strip())
+        self.repo_url, _ = resolve_git_repo_url(self.display_repo_url)
         self.work_dir = work_dir.resolve()
         self.timeout_seconds = timeout_seconds
 
     def clone_or_update(self) -> Path:
         """Clone repository or pull latest changes if already present."""
         if (self.work_dir / ".git").is_dir():
+            self._ensure_remote_url()
             logger.info("Repository exists at %s — updating", self.work_dir)
             retry_with_backoff(
                 lambda: self._run(["git", "fetch", "--all", "--prune"], cwd=self.work_dir),
@@ -50,13 +53,21 @@ class GitHubManager:
             return self.work_dir
 
         self.work_dir.parent.mkdir(parents=True, exist_ok=True)
-        logger.info("Cloning %s into %s", self.repo_url, self.work_dir)
+        logger.info("Cloning %s into %s", self.display_repo_url, self.work_dir)
 
         def _clone() -> None:
             self._run(["git", "clone", self.repo_url, str(self.work_dir)])
+            self._ensure_remote_url()
 
         retry_with_backoff(_clone, operation_name="git clone", retryable=(GitError,))
         return self.work_dir
+
+    def _ensure_remote_url(self) -> None:
+        self._run(
+            ["git", "remote", "set-url", "origin", self.repo_url],
+            cwd=self.work_dir,
+            check=False,
+        )
 
     def checkout_staging(self, create_if_missing: bool = True) -> None:
         """Align VPS with origin/staging, or create and push staging when absent."""
@@ -207,7 +218,7 @@ class GitHubManager:
         check: bool = True,
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        cmd_str = " ".join(cmd)
+        cmd_str = self._redact_cmd_for_log(cmd)
         cwd_str = str(cwd) if cwd else "(none)"
         logger.info("Git command: %s | cwd=%s", cmd_str, cwd_str)
 
@@ -222,6 +233,7 @@ class GitHubManager:
                 capture_output=capture_output,
                 text=True,
                 timeout=self.timeout_seconds,
+                env=git_subprocess_env(),
             )
         except FileNotFoundError as exc:
             logger.error(
@@ -263,12 +275,32 @@ class GitHubManager:
             stderr = result.stderr.strip() if capture_output else ""
             stdout = result.stdout.strip() if capture_output else ""
             detail = stderr or stdout or f"exit code {result.returncode}"
+            remediation = "Inspect git output above and verify credentials/branch state."
+            auth_markers = (
+                "could not read Username",
+                "Authentication failed",
+                "Permission denied",
+                "invalid credentials",
+                "Repository not found",
+            )
+            if any(marker.lower() in detail.lower() for marker in auth_markers):
+                remediation = git_auth_remediation()
             raise GitError(
                 f"Git command failed: {cmd_str} — {detail}",
-                remediation="Inspect git output above and verify credentials/branch state.",
+                remediation=remediation,
             )
 
         return result
+
+    @staticmethod
+    def _redact_cmd_for_log(cmd: list[str]) -> str:
+        parts: list[str] = []
+        for part in cmd:
+            if "x-access-token:" in part:
+                parts.append(re.sub(r"x-access-token:[^@]+@", "x-access-token:***@", part))
+            else:
+                parts.append(part)
+        return " ".join(parts)
 
     @staticmethod
     def sanitize_repo_name(repo_url: str) -> str:
