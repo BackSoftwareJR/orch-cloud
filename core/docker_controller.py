@@ -12,6 +12,7 @@ import docker
 from docker.errors import DockerException, ImageNotFound, NotFound
 from docker.models.containers import Container
 
+from core.agent_env import DEFAULT_AGENT_ENV, get_cursor_api_key, resolve_agent_env
 from core.exceptions import DockerOrchestratorError, ProjectNotInitializedError
 from core.log_parser import extract_progress_events, is_agent_success
 from core.retry import retry_with_backoff
@@ -20,7 +21,6 @@ from core.security import check_ssh_key_permissions, redact_secrets
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_IMAGE = "hyper-agent-base"
-DEFAULT_AGENT_ENV = Path("/opt/agent-orchestrator/config/agent.env")
 AGENT_BINARY = "cursor-agent-entrypoint.sh"
 
 
@@ -92,15 +92,14 @@ class DockerController:
             ) from exc
 
     def _ensure_cursor_api_key(self) -> None:
-        env = self._parse_env_file(self.agent_env_path)
-        if env.get("CURSOR_API_KEY"):
+        if get_cursor_api_key(self.agent_env_path):
             return
         raise DockerOrchestratorError(
-            f"CURSOR_API_KEY not found in {self.agent_env_path}",
+            "CURSOR_API_KEY is not configured for agent containers.",
             remediation=(
-                "Create the file with: "
-                "echo 'CURSOR_API_KEY=your_key' | sudo tee /opt/agent-orchestrator/config/agent.env "
-                "&& sudo chmod 600 /opt/agent-orchestrator/config/agent.env"
+                "Run: ./deploy/setup-cursor-api-key.sh "
+                "OR add CURSOR_API_KEY to /opt/agent-orchestrator/config/agent.env "
+                "OR add CURSOR_API_KEY to /opt/orch-cloud/.env"
             ),
         )
 
@@ -143,8 +142,7 @@ class DockerController:
         command = self._build_agent_command(prompt, model=model, yolo=yolo, working_dir=working_dir)
         logger.info("Agent CLI: %s", self._format_agent_command_for_log(command))
 
-        env = {}
-        env.update(self._parse_env_file(self.agent_env_path))
+        env = resolve_agent_env(self.agent_env_path)
         if extra_env:
             env.update(extra_env)
 

@@ -77,23 +77,33 @@ echo
 
 echo "==> Agent env file:"
 AGENT_ENV="/opt/agent-orchestrator/config/agent.env"
-if [[ -f "$AGENT_ENV" ]]; then
-  if grep -q '^CURSOR_API_KEY=' "$AGENT_ENV"; then
-    echo "  OK — CURSOR_API_KEY set in agent.env"
-    if docker run --rm --env-file "$AGENT_ENV" hyper-agent-base \
-      cursor-agent-entrypoint.sh -p --trust --sandbox disabled --force "Reply with OK" 2>&1 | head -5 | sed 's/^/  /'; then
-      echo "  OK — cursor-agent responds inside container"
-    else
-      echo "  FAIL — cursor-agent failed inside container (check API key validity)"
-    fi
+PROJECT_ENV="/opt/orch-cloud/.env"
+HAS_KEY=0
+if [[ -f "$AGENT_ENV" ]] && grep -q '^CURSOR_API_KEY=' "$AGENT_ENV"; then
+  echo "  OK — CURSOR_API_KEY in $AGENT_ENV"
+  HAS_KEY=1
+elif [[ -f "$PROJECT_ENV" ]] && grep -q '^CURSOR_API_KEY=' "$PROJECT_ENV"; then
+  echo "  OK — CURSOR_API_KEY in $PROJECT_ENV"
+  HAS_KEY=1
+fi
+if [[ "$HAS_KEY" -eq 0 ]]; then
+  if [[ -f "$AGENT_ENV" ]]; then
+    echo "  FAIL — $AGENT_ENV exists but CURSOR_API_KEY is missing"
   else
-    echo "  FAIL — agent.env exists but CURSOR_API_KEY is missing"
+    echo "  FAIL — CURSOR_API_KEY not found in $AGENT_ENV or $PROJECT_ENV"
   fi
+  echo "  Fix: ./deploy/setup-cursor-api-key.sh"
 else
-  echo "  FAIL — $AGENT_ENV not found"
-  echo "  Fix: sudo mkdir -p /opt/agent-orchestrator/config"
-  echo "       echo 'CURSOR_API_KEY=your_key' | sudo tee $AGENT_ENV"
-  echo "       sudo chmod 600 $AGENT_ENV"
+  ENV_FILE="$AGENT_ENV"
+  if [[ ! -f "$ENV_FILE" ]] || ! grep -q '^CURSOR_API_KEY=' "$ENV_FILE"; then
+    ENV_FILE="$PROJECT_ENV"
+  fi
+  if docker run --rm --env-file "$ENV_FILE" hyper-agent-base \
+    cursor-agent-entrypoint.sh -p --trust --sandbox disabled --force "Reply with OK" 2>&1 | head -5 | sed 's/^/  /'; then
+    echo "  OK — cursor-agent responds inside container"
+  else
+    echo "  FAIL — cursor-agent failed (check API key validity at cursor.com/settings)"
+  fi
 fi
 echo
 

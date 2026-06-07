@@ -7,9 +7,11 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.agent_env import get_cursor_api_key
 from core.docker_controller import AGENT_BINARY, DockerController
 from core.exceptions import HealthCheckError
 from core.security import check_ssh_key_permissions, validate_repo_url
+from server.config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -89,16 +91,21 @@ def run_preflight_checks(
     except Exception as exc:
         fail(f"Docker image '{docker.base_image}'", str(exc))
 
-    # Agent env
+    # Agent env + Cursor API key
     env_path = agent_env_path or docker.agent_env_path
-    if env_path.is_file():
-        env_vars = DockerController._parse_env_file(env_path)
-        if env_vars.get("CURSOR_API_KEY"):
-            ok(f"CURSOR_API_KEY set in {env_path}")
-        else:
-            fail("CURSOR_API_KEY", f"Missing from {env_path} — agent containers will fail immediately")
+    cursor_key = get_cursor_api_key(env_path)
+    if cursor_key:
+        ok("CURSOR_API_KEY configured for agent containers")
+    elif env_path.is_file() or (PROJECT_ROOT / ".env").is_file():
+        fail(
+            "CURSOR_API_KEY",
+            "Missing from agent.env and /opt/orch-cloud/.env — run ./deploy/setup-cursor-api-key.sh",
+        )
     else:
-        fail("agent.env", f"Not found at {env_path} — create it with CURSOR_API_KEY")
+        fail(
+            "agent.env",
+            f"Not found at {env_path} — run ./deploy/setup-cursor-api-key.sh",
+        )
 
     # SSH
     ssh = ssh_dir or docker.ssh_dir
