@@ -30,7 +30,24 @@ Optional HMAC on outbound callbacks via `WEBHOOK_SECRET`.
 
 ## n8n integration — `POST /api/v1/execute-agent`
 
-Drop-in replacement for the legacy ngrok endpoint. Use this URL in your n8n HTTP Request node:
+Drop-in replacement for the legacy ngrok endpoint.
+### After changing `.env` on the VPS
+
+systemd reads `/opt/orch-cloud/.env` only when **orchestrator-api** starts. Editing the file does not affect the running process until you restart:
+
+```bash
+sudo cp /opt/orch-cloud/deploy/orchestrator-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart orchestrator-api
+curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST http://127.0.0.1:8000/api/v1/execute-agent \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $(grep '^ORCHESTRATOR_API_TOKEN=' /opt/orch-cloud/.env | cut -d= -f2- | tr -d '\"'"'"''"'"')'" \
+  -d '{"dedicated_prompt":"test","github_url":"https://github.com/BackSoftwareJR/villa_sole"}'
+```
+
+Expect **HTTP 200**. **401** means the key in your request does not match `ORCHESTRATOR_API_TOKEN` in the running service (wrong value, stale process, or n8n header not `X-API-Key`).
+
+ Use this URL in your n8n HTTP Request node:
 
 ```
 http://2.24.15.210:8000/api/v1/execute-agent

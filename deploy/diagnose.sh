@@ -17,6 +17,29 @@ else
 fi
 echo
 
+echo "==> ORCHESTRATOR_API_TOKEN (from .env and running API process):"
+if [[ -f "$ENV_FILE" ]]; then
+  grep -E '^(ORCHESTRATOR_API_TOKEN|WEBHOOK_TOKEN)=' "$ENV_FILE" | sed 's/=.*/=***masked***/' || echo "  (no API token vars in .env)"
+else
+  echo "  (.env missing)"
+fi
+if systemctl is-active orchestrator-api >/dev/null 2>&1; then
+  PROC_ENV=$(systemctl show orchestrator-api -p Environment --value 2>/dev/null || true)
+  if [[ "$PROC_ENV" == *ORCHESTRATOR_API_TOKEN=* ]]; then
+    echo "  orchestrator-api process has ORCHESTRATOR_API_TOKEN set (via systemd EnvironmentFile)"
+  else
+    echo "  WARNING: orchestrator-api may not load ORCHESTRATOR_API_TOKEN — check /etc/systemd/system/orchestrator-api.service for EnvironmentFile=/opt/orch-cloud/.env"
+  fi
+  TOKEN=$(grep -E '^ORCHESTRATOR_API_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d '' || true)
+  if [[ -n "$TOKEN" ]]; then
+    HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8000/api/v1/execute-agent       -H "Content-Type: application/json" -H "X-API-Key: $TOKEN"       -d '{"dedicated_prompt":"diagnose ping","github_url":"https://github.com/BackSoftwareJR/villa_sole"}')
+    echo "  Local execute-agent auth test: HTTP $HTTP (expect 200)"
+  fi
+else
+  echo "  orchestrator-api not running — skip auth test"
+fi
+echo
+
 echo "==> API service status:"
 systemctl is-active orchestrator-api 2>/dev/null || echo "  orchestrator-api not found/inactive"
 echo

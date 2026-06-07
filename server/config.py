@@ -12,11 +12,12 @@ DEFAULT_DATABASE_URL = f"sqlite:///{PROJECT_ROOT / 'orchestrator.db'}"
 
 
 def get_api_token() -> str:
-    return (
+    raw = (
         os.environ.get("ORCHESTRATOR_API_TOKEN")
         or os.environ.get("WEBHOOK_TOKEN")
         or DEFAULT_DEV_TOKEN
     )
+    return raw.strip().strip('"').strip("'")
 
 
 def get_database_url() -> str:

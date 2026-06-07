@@ -59,6 +59,9 @@ cd "$ROOT_DIR"
 echo "==> Building Docker agent image (hyper-agent-base)..."
 docker build -t hyper-agent-base .
 
+echo "==> Installing systemd unit files..."
+sudo cp "$ROOT_DIR/deploy/orchestrator-api.service" "$ROOT_DIR/deploy/orchestrator-dashboard.service" /etc/systemd/system/
+
 echo "==> Reloading systemd units (pick up any unit file changes)..."
 sudo systemctl daemon-reload
 
