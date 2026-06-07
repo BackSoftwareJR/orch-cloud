@@ -63,6 +63,23 @@ def test_restart_job_creates_new_queued_run() -> None:
     assert restarted.parent_job_id == source.job_id
 
 
+def test_restart_continue_auto_fix_normalize_legacy_preset_repr() -> None:
+    db = _session()
+    source = _seed_project_and_job(db, status=JobStatus.FAILED)
+    source.preset = "AgentPreset.UX"
+    source.error_message = "Process exited with code 1"
+    db.commit()
+
+    restarted = restart_job(db, source.job_id)
+    assert restarted.preset == "ux"
+
+    continued = continue_job(db, source.job_id, "Polish spacing on mobile")
+    assert continued.preset == "ux"
+
+    fixed = auto_fix_job(db, source.job_id)
+    assert fixed.preset == "ux"
+
+
 def test_requeue_job_resets_terminal_state() -> None:
     db = _session()
     job = _seed_project_and_job(db, status=JobStatus.FAILED)

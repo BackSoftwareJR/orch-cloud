@@ -52,16 +52,26 @@ class AgentPreset(str, Enum):
     BUGFIX = "bugfix"
 
     @classmethod
-    def from_value(cls, value: str | None) -> AgentPreset:
+    def from_value(cls, value: str | AgentPreset | None) -> AgentPreset:
+        if isinstance(value, cls):
+            return value
         if value is None or not str(value).strip():
             return cls.GENERAL
-        key = str(value).lower().strip()
+        raw = str(value).strip()
+        if raw.startswith("AgentPreset."):
+            raw = raw.split(".", 1)[1]
+        key = raw.lower()
         for member in cls:
-            if member.value == key:
+            if member.value == key or member.name.lower() == key:
                 return member
         raise ValueError(
             f"Invalid preset '{value}'. Use: {', '.join(m.value for m in cls)}."
         )
+
+    @classmethod
+    def to_value(cls, value: str | AgentPreset | None) -> str:
+        """Return canonical CLI/DB preset string (e.g. ``general``)."""
+        return cls.from_value(value).value
 
 
 class TaskRequest(BaseModel):

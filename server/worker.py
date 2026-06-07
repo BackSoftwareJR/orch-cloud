@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from core.models import AgentPreset
 from server.config import PROJECT_ROOT, get_max_concurrent_jobs
 from server.database import SessionLocal
 from server.job_service import record_job_outcome
@@ -137,7 +138,7 @@ async def _dispatch_job(job: Job) -> None:
         repo_url = project.repo_url
         task = db_job.task
         level = db_job.level
-        preset = db_job.preset
+        preset = AgentPreset.to_value(db_job.preset)
         job_id = db_job.job_id
     finally:
         db.close()

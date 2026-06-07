@@ -8,9 +8,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core.models import AgentPreset
 from server.config import JOBS_DIR, PROJECT_ROOT, get_max_debug_retries
 
 logger = logging.getLogger(__name__)
+
+
+def _preset_cli_value(preset: str | AgentPreset) -> str:
+    """Normalize preset for CLI ``--preset`` (always lowercase value string)."""
+    if isinstance(preset, AgentPreset):
+        return preset.value
+    return AgentPreset.from_value(preset).value
 
 
 def resolve_orchestrator_cmd() -> list[str]:
@@ -31,7 +39,7 @@ def build_command(
     repo_url: str,
     task: str,
     level: str,
-    preset: str = "general",
+    preset: str | AgentPreset = "general",
     *,
     max_retries: int | None = None,
 ) -> list[str]:
@@ -44,7 +52,7 @@ def build_command(
         "--level",
         level,
         "--preset",
-        preset,
+        _preset_cli_value(preset),
         "--max-retries",
         str(retries),
         "--json-log",

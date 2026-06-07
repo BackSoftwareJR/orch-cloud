@@ -246,7 +246,7 @@ def _registry() -> dict[AgentPreset, PresetDefinition]:
 
 
 def get_preset(preset: AgentPreset | str) -> PresetDefinition:
-    if isinstance(preset, str):
+    if not isinstance(preset, AgentPreset):
         preset = AgentPreset.from_value(preset)
     return _registry()[preset]
 

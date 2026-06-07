@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from core.models import AgentPreset
 from core.security import sanitize_task_prompt
 from server.models import Job, JobMessage, JobStatus, MessageRole, Project
 from server.orchestrator import job_log_path, read_log_tail
@@ -36,6 +37,11 @@ _MAX_ERROR_EXCERPT_CHARS = 2000
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _job_preset_value(preset: str | AgentPreset | None) -> str:
+    """Store and pass canonical preset strings, not enum reprs."""
+    return AgentPreset.to_value(preset)
 
 
 def _get_job_or_404(db: Session, job_id: str) -> Job:
@@ -233,7 +239,7 @@ def auto_fix_job(db: Session, job_id: str) -> Job:
         project_id=source.project_id,
         task=composed_task,
         level=source.level,
-        preset=source.preset,
+        preset=_job_preset_value(source.preset),
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(new_uuid)),
         parent_job_id=source.job_id,
@@ -266,7 +272,7 @@ def restart_job(db: Session, job_id: str) -> Job:
         project_id=source.project_id,
         task=source.task,
         level=source.level,
-        preset=source.preset,
+        preset=_job_preset_value(source.preset),
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(new_uuid)),
         parent_job_id=source.job_id,
@@ -340,7 +346,7 @@ def continue_job(db: Session, job_id: str, message: str) -> Job:
         project_id=source.project_id,
         task=composed_task,
         level=source.level,
-        preset=source.preset,
+        preset=_job_preset_value(source.preset),
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(new_uuid)),
         parent_job_id=source.job_id,

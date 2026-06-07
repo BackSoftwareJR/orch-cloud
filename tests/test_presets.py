@@ -19,6 +19,21 @@ def test_list_presets_includes_all_roles() -> None:
 def test_agent_preset_from_value() -> None:
     assert AgentPreset.from_value("UX") == AgentPreset.UX
     assert AgentPreset.from_value(None) == AgentPreset.GENERAL
+    assert AgentPreset.from_value("AgentPreset.GENERAL") == AgentPreset.GENERAL
+    assert AgentPreset.from_value("AgentPreset.UX") == AgentPreset.UX
+    assert AgentPreset.to_value("AgentPreset.GENERAL") == "general"
+    assert AgentPreset.to_value(AgentPreset.UX) == "ux"
+
+
+def test_get_preset_accepts_enum_repr_string() -> None:
+    preset = get_preset("AgentPreset.GENERAL")
+    assert preset.id == AgentPreset.GENERAL
+    assert preset.label == "General"
+
+
+def test_get_preset_accepts_enum_instance() -> None:
+    preset = get_preset(AgentPreset.BACKEND)
+    assert preset.id == AgentPreset.BACKEND
 
 
 def test_resolve_level_uses_preset_default() -> None:
