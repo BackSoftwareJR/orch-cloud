@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from server.config import PROJECT_ROOT, get_max_concurrent_jobs
 from server.database import SessionLocal
+from server.job_service import record_job_outcome
 from server.models import Job, JobStatus, Project
 from server.orchestrator import build_command, job_log_path, write_log_header
 
@@ -74,16 +75,26 @@ async def _run_subprocess(job_id: str, repo_url: str, task: str, level: str, log
             job = db.query(Job).filter(Job.job_id == job_id).one_or_none()
             if job is None:
                 return
+            if job.status == JobStatus.CANCELLED:
+                return
             job.finished_at = _utcnow()
             job.logs_path = log_path_str
             if error_message:
                 job.status = JobStatus.FAILED
                 job.error_message = error_message
+                record_job_outcome(db, job_id, success=False, error_message=error_message)
             elif exit_code == 0:
                 job.status = JobStatus.COMPLETED
+                record_job_outcome(db, job_id, success=True, error_message=None)
             else:
                 job.status = JobStatus.FAILED
                 job.error_message = f"Process exited with code {exit_code}"
+                record_job_outcome(
+                    db,
+                    job_id,
+                    success=False,
+                    error_message=job.error_message,
+                )
             db.commit()
         finally:
             db.close()
@@ -95,7 +106,10 @@ async def _dispatch_job(job: Job) -> None:
     try:
         db_job = (
             db.query(Job)
-            .filter(Job.job_id == job.job_id, Job.status == JobStatus.QUEUED)
+            .filter(
+                Job.job_id == job.job_id,
+                Job.status == JobStatus.QUEUED,
+            )
             .one_or_none()
         )
         if db_job is None:

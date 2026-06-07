@@ -43,25 +43,36 @@ export function LiveTerminal({ jobId, title = "Live logs" }: LiveTerminalProps) 
   }, [lines]);
 
   return (
-    <section className="glass-panel flex h-full min-h-[320px] flex-col overflow-hidden rounded-3xl">
-      <div className="flex items-center justify-between border-b border-white/5 px-5 py-3">
-        <div className="flex items-center gap-2">
-          <Terminal className="h-4 w-4 text-accent-glow" />
-          <span className="text-sm font-medium tracking-tight">{title}</span>
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-white/[0.04] bg-[#050508]">
+      {title ? (
+        <div className="flex items-center justify-between border-b border-white/5 px-4 py-2">
+          <div className="flex items-center gap-2">
+            <Terminal className="h-3.5 w-3.5 text-accent-glow" />
+            <span className="text-xs font-medium tracking-tight">{title}</span>
+          </div>
+          <div className="flex items-center gap-2 text-[10px]">
+            <Radio
+              className={`h-3 w-3 ${connected ? "text-emerald-400" : "text-zinc-600"}`}
+            />
+            <span className={connected ? "text-emerald-400" : "text-zinc-500"}>
+              {jobId ? (connected ? "Streaming" : "Connecting…") : "No job"}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-xs">
+      ) : (
+        <div className="flex items-center justify-end border-b border-white/5 px-3 py-1.5 text-[10px]">
           <Radio
-            className={`h-3 w-3 ${connected ? "text-emerald-400" : "text-zinc-600"}`}
+            className={`mr-1.5 h-3 w-3 ${connected ? "text-emerald-400" : "text-zinc-600"}`}
           />
           <span className={connected ? "text-emerald-400" : "text-zinc-500"}>
-            {jobId ? (connected ? "Streaming" : "Connecting…") : "No job selected"}
+            {jobId ? (connected ? "Streaming" : "Connecting…") : "No job"}
           </span>
         </div>
-      </div>
+      )}
 
       <div
         ref={containerRef}
-        className="scrollbar-thin flex-1 overflow-y-auto bg-[#050508] px-4 py-3 font-mono text-[12px] leading-relaxed"
+        className="scrollbar-thin flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed"
       >
         {!jobId ? (
           <p className="text-zinc-600">Select a job from the queue or history to stream logs.</p>
@@ -79,8 +90,8 @@ export function LiveTerminal({ jobId, title = "Live logs" }: LiveTerminalProps) 
         {error && <p className="mt-2 text-red-400">{error}</p>}
       </div>
 
-      {jobId && (
-        <div className="border-t border-white/5 px-5 py-2 font-mono text-[10px] text-zinc-600">
+      {jobId && title && (
+        <div className="border-t border-white/5 px-4 py-1.5 font-mono text-[10px] text-zinc-600">
           {jobId}
         </div>
       )}

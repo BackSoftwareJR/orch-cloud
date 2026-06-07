@@ -55,3 +55,15 @@ body {
 .terminal-line-dim {
   @apply text-zinc-500;
 }
+
+.chat-bubble-user {
+  @apply border border-accent/20 bg-accent/10 text-zinc-100;
+}
+
+.chat-bubble-assistant {
+  @apply border border-white/10 bg-white/[0.04] text-zinc-200;
+}
+
+.chat-bubble-system {
+  @apply border border-amber-500/20 bg-amber-500/5 text-zinc-300;
+}

@@ -11,9 +11,23 @@ from sqlalchemy.orm import Session
 
 from server.auth import verify_token
 from server.database import get_db
+from server.job_service import (
+    cancel_job,
+    continue_job,
+    get_job_messages,
+    requeue_job,
+    restart_job,
+    seed_task_message,
+)
 from server.models import Job, JobStatus, Project
 from server.orchestrator import job_log_path, read_log_tail
-from server.schemas import JobCreate, JobResponse, JobStatusResponse
+from server.schemas import (
+    JobContinueRequest,
+    JobCreate,
+    JobMessageResponse,
+    JobResponse,
+    JobStatusResponse,
+)
 
 router = APIRouter(tags=["jobs"])
 
@@ -35,6 +49,8 @@ def _job_to_response(job: Job, *, include_tail: bool = False) -> JobResponse:
         finished_at=job.finished_at,
         logs_path=job.logs_path,
         error_message=job.error_message,
+        parent_job_id=job.parent_job_id,
+        thread_root_id=job.thread_root_id,
         log_tail=tail,
     )
 
@@ -73,6 +89,49 @@ def get_job(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return _job_to_response(job, include_tail=tail)
+
+
+@router.get("/jobs/{job_id}/messages", response_model=list[JobMessageResponse])
+def list_job_messages(job_id: str, db: Session = Depends(get_db)) -> list[JobMessageResponse]:
+    messages = get_job_messages(db, job_id)
+    return [
+        JobMessageResponse(
+            id=message.id,
+            job_id=message.job_id,
+            role=message.role.value,
+            content=message.content,
+            created_at=message.created_at,
+        )
+        for message in messages
+    ]
+
+
+@router.post("/jobs/{job_id}/restart", response_model=JobResponse, status_code=201)
+def restart_job_endpoint(job_id: str, db: Session = Depends(get_db)) -> JobResponse:
+    job = restart_job(db, job_id)
+    return _job_to_response(job)
+
+
+@router.post("/jobs/{job_id}/requeue", response_model=JobResponse)
+def requeue_job_endpoint(job_id: str, db: Session = Depends(get_db)) -> JobResponse:
+    job = requeue_job(db, job_id)
+    return _job_to_response(job)
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobResponse)
+def cancel_job_endpoint(job_id: str, db: Session = Depends(get_db)) -> JobResponse:
+    job = cancel_job(db, job_id)
+    return _job_to_response(job)
+
+
+@router.post("/jobs/{job_id}/continue", response_model=JobResponse, status_code=201)
+def continue_job_endpoint(
+    job_id: str,
+    payload: JobContinueRequest,
+    db: Session = Depends(get_db),
+) -> JobResponse:
+    job = continue_job(db, job_id, payload.message)
+    return _job_to_response(job)
 
 
 @router.get("/jobs/{job_id}/legacy", response_model=JobStatusResponse)
@@ -116,8 +175,11 @@ def trigger_project_job(
         level=payload.level,
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(job_uuid)),
+        thread_root_id=job_uuid,
     )
     db.add(job)
+    db.flush()
+    seed_task_message(db, job)
     db.commit()
     db.refresh(job)
     return _job_to_response(job)

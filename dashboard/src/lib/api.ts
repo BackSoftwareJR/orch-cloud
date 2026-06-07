@@ -1,7 +1,9 @@
 import type {
+  ContinueJobPayload,
   CreateProjectPayload,
   HealthStatus,
   Job,
+  JobMessage,
   Project,
   TriggerJobPayload,
 } from "./types";
@@ -95,6 +97,29 @@ export async function triggerJob(
   payload: TriggerJobPayload,
 ): Promise<Job> {
   return request<Job>(`/projects/${projectId}/jobs`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchJobMessages(jobId: string): Promise<JobMessage[]> {
+  return request<JobMessage[]>(`/jobs/${jobId}/messages`);
+}
+
+export async function restartJob(jobId: string): Promise<Job> {
+  return request<Job>(`/jobs/${jobId}/restart`, { method: "POST" });
+}
+
+export async function requeueJob(jobId: string): Promise<Job> {
+  return request<Job>(`/jobs/${jobId}/requeue`, { method: "POST" });
+}
+
+export async function cancelJob(jobId: string): Promise<Job> {
+  return request<Job>(`/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
+export async function continueJob(jobId: string, payload: ContinueJobPayload): Promise<Job> {
+  return request<Job>(`/jobs/${jobId}/continue`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

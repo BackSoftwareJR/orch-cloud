@@ -33,3 +33,15 @@ def init_db() -> None:
     from server import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _migrate_schema()
+
+
+def _migrate_schema() -> None:
+    """Add columns introduced after initial deploys (SQLite-safe)."""
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql("PRAGMA table_info(jobs)").fetchall()
+        existing = {row[1] for row in rows}
+        if "parent_job_id" not in existing:
+            conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN parent_job_id VARCHAR(36)")
+        if "thread_root_id" not in existing:
+            conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN thread_root_id VARCHAR(36)")

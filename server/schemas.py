@@ -133,7 +133,31 @@ class JobResponse(BaseModel):
     finished_at: datetime | None
     logs_path: str | None
     error_message: str | None
+    parent_job_id: str | None = None
+    thread_root_id: str | None = None
     log_tail: str | None = None
+
+
+class JobContinueRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        try:
+            return sanitize_task_prompt(value)
+        except SecurityError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+class JobMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_id: str
+    role: str
+    content: str
+    created_at: datetime
 
 
 class JobStatusResponse(BaseModel):

@@ -25,6 +25,12 @@ class JobStatus(str, enum.Enum):
     CANCELLED = "CANCELLED"
 
 
+class MessageRole(str, enum.Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -58,5 +64,24 @@ class Job(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     logs_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parent_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    thread_root_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     project: Mapped[Project] = relationship("Project", back_populates="jobs")
+    messages: Mapped[list[JobMessage]] = relationship(
+        "JobMessage", back_populates="job", cascade="all, delete-orphan"
+    )
+
+
+class JobMessage(Base):
+    __tablename__ = "job_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("jobs.job_id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    role: Mapped[MessageRole] = mapped_column(Enum(MessageRole), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    job: Mapped[Job] = relationship("Job", back_populates="messages")

@@ -5,6 +5,8 @@ export type JobStatus =
   | "FAILED"
   | "CANCELLED";
 
+export type MessageRole = "user" | "assistant" | "system";
+
 export interface Project {
   id: number;
   name: string;
@@ -25,7 +27,17 @@ export interface Job {
   finished_at: string | null;
   logs_path: string | null;
   error_message: string | null;
+  parent_job_id?: string | null;
+  thread_root_id?: string | null;
   log_tail?: string | null;
+}
+
+export interface JobMessage {
+  id: number;
+  job_id: string;
+  role: MessageRole;
+  content: string;
+  created_at: string;
 }
 
 export interface HealthStatus {
@@ -45,3 +57,9 @@ export interface TriggerJobPayload {
   task: string;
   level: string;
 }
+
+export interface ContinueJobPayload {
+  message: string;
+}
+
+export type TaskListFilter = "all" | "active" | "done";
