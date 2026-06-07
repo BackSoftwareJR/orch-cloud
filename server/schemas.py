@@ -13,6 +13,22 @@ from core.security import sanitize_task_prompt, validate_repo_url
 from server.models import JobStatus
 
 
+def _coerce_optional_str(value: object) -> str | None:
+    """Accept CRM/n8n values that arrive as numbers or other scalars."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else str(value)
+    return str(value)
+
+
 class CursorApiKeyStatus(BaseModel):
     configured: bool
     masked_preview: str | None = None
@@ -271,6 +287,35 @@ class ExecuteAgentRequest(BaseModel):
     website_url: str | None = None
     crm_log_url: str | None = None
     crm_auth_token: str | None = None
+
+    @field_validator(
+        "specialist_role",
+        "task_id",
+        "project_id",
+        "website_url",
+        "crm_log_url",
+        "crm_auth_token",
+        mode="before",
+    )
+    @classmethod
+    def coerce_crm_fields(cls, value: object) -> str | None:
+        return _coerce_optional_str(value)
+
+    @field_validator("dedicated_prompt", mode="before")
+    @classmethod
+    def coerce_prompt(cls, value: object) -> str:
+        coerced = _coerce_optional_str(value)
+        if not coerced:
+            raise ValueError("dedicated_prompt is required")
+        return coerced
+
+    @field_validator("github_url", mode="before")
+    @classmethod
+    def coerce_github(cls, value: object) -> str:
+        coerced = _coerce_optional_str(value)
+        if not coerced:
+            raise ValueError("github_url is required")
+        return coerced
 
     @field_validator("dedicated_prompt")
     @classmethod

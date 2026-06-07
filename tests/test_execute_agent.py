@@ -67,6 +67,26 @@ def test_execute_agent_accepts_quoted_x_api_key(api_client: TestClient) -> None:
     assert response.status_code == 200
 
 
+def test_execute_agent_accepts_numeric_crm_ids(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/api/v1/execute-agent",
+        json=_execute_payload(task_id=232, project_id=41),
+        headers={"X-API-Key": "n8n-test-key"},
+    )
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+
+    from server.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.job_id == run_id).one()
+        assert job.metadata_["crm_task_id"] == "232"
+        assert job.metadata_["crm_project_id"] == "41"
+    finally:
+        db.close()
+
+
 def test_execute_agent_maps_frontend_to_ux_preset(api_client: TestClient) -> None:
     response = api_client.post(
         "/api/v1/execute-agent",
