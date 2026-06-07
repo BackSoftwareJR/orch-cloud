@@ -101,8 +101,44 @@ Detail includes `quality_checklist`, `output_expectations`, `forbidden_actions`.
 | `ORCHESTRATOR_API_TOKEN` | Inbound API auth |
 | `REQUIRE_API_TOKEN` | Enforce token on job creation |
 | `WEBHOOK_SECRET` | HMAC for outbound callbacks |
-| `CURSOR_API_KEY` | Agent execution |
+| `CURSOR_API_KEY` | Agent execution (file or dashboard Settings) |
+| `AGENT_ENV_PATH` | Override path to agent.env (default `/opt/agent-orchestrator/config/agent.env`) |
 | `CORS_ORIGINS` | Include `https://backclub.it` |
+
+## Settings — Cursor API key
+
+Manage the Cursor account used by agent containers without restarting the VPS.
+
+```http
+GET /settings
+PUT /settings/cursor-api-key
+DELETE /settings/cursor-api-key
+```
+
+When `REQUIRE_API_TOKEN=true`, send `Authorization: Bearer <ORCHESTRATOR_API_TOKEN>`.
+
+**GET /settings** response (key is never returned in full):
+
+```json
+{
+  "cursor_api_key": {
+    "configured": true,
+    "masked_preview": "****************1234",
+    "updated_at": "2026-06-07T12:00:00+00:00",
+    "source_path": "/opt/agent-orchestrator/config/agent.env"
+  }
+}
+```
+
+**PUT /settings/cursor-api-key** body:
+
+```json
+{ "api_key": "key_xxxxxxxx" }
+```
+
+**Hot reload:** the key is written to `agent.env`. The next job reads it from disk when spawning Docker agent containers. Running jobs keep the key they started with. No VPS or `orchestrator-api` restart is required.
+
+`GET /health` also includes `cursor_api_key` status.
 
 ## Roadmap: backclub.it workspace
 

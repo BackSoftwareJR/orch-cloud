@@ -11,8 +11,8 @@ from pathlib import Path
 from openai import OpenAI
 
 from core.analyzers.detector import detect_framework, select_analyzer
-from core.context_builder import prioritize_context
-from core.presets.registry import PresetDefinition, get_preset
+from core.context_builder import build_agent_context
+from core.presets.registry import PresetDefinition, get_preset, resolve_model
 from core.docker_controller import DockerController
 from core.exceptions import GitConflictError, GitError, HealthCheckError, HyperOrchestratorError, ProjectNotInitializedError
 from core.github_manager import GitHubManager
@@ -28,7 +28,9 @@ from core.models import (
     TaskPlan,
     TaskRequest,
 )
+from core.execution_router import ExecutionRouter
 from core.run_report import build_run_report, write_run_report
+from core.supervisor import summarize_run
 from core.task_planner import rollback_completed_steps, validate_and_order_plan
 from core.test_runner import TestCheckResult, format_test_failure_for_agent, run_preset_check
 
@@ -62,6 +64,9 @@ class HyperOrchestrator:
         self._health_warnings: list[str] = []
         self._completed_pro_steps: list[int] = []
         self.preset_def: PresetDefinition = get_preset(request.preset)
+        self._execution_router = ExecutionRouter(docker=self.docker, json_logs=request.json_logs)
+        self._checkpoints: list[dict[str, object]] = []
+        self.agent_model = resolve_model(request.preset, request.model)
 
     @property
     def openai_client(self) -> OpenAI:
@@ -95,7 +100,7 @@ class HyperOrchestrator:
             logger.info(
                 "Preset=%s model=%s yolo=%s",
                 self.preset_def.id.value,
-                self.preset_def.model,
+                self.agent_model,
                 self.preset_def.yolo,
             )
 
@@ -174,6 +179,7 @@ class HyperOrchestrator:
                 "framework_confidence": self.framework_confidence,
                 "test_command": self.test_command,
                 "tests_skipped": result.tests_skipped,
+                "checkpoints": self._checkpoints,
             },
         )
         try:
@@ -289,17 +295,18 @@ class HyperOrchestrator:
         if strict is None:
             strict = preset.strict_by_default
 
-        context_excerpt = prioritize_context(
+        context_excerpt = build_agent_context(
+            self.project_root,
             self.analysis.summary,
-            max_chars=6000,
             task=self.request.task,
+            preset=preset.id,
             section_priorities=preset.context_priorities or None,
         )
         lines = [
             preset.system_prompt,
             "",
             f"You are working in a {self.framework} project at /workspace.",
-            f"Project context (prioritized excerpt):\n{context_excerpt}",
+            context_excerpt,
             "",
             f"Task: {task}",
             "",
@@ -324,6 +331,22 @@ class HyperOrchestrator:
         lines.extend(["", preset.quality_block])
         return "\n".join(lines)
 
+    def _record_agent_checkpoint(
+        self,
+        outcome,
+        *,
+        attempt: int | None = None,
+    ) -> None:
+        checkpoint = summarize_run(
+            outcome.result,
+            outcome.result.logs,
+            model=outcome.model_used,
+            attempt=attempt,
+        )
+        if outcome.model_switches:
+            checkpoint["model_switches"] = outcome.model_switches
+        self._checkpoints.append(checkpoint)
+
     def _run_preset_agent(
         self,
         task: str,
@@ -331,6 +354,7 @@ class HyperOrchestrator:
         strict: bool | None = None,
         context_suffix: str = "",
         prior_errors: str = "",
+        attempt: int | None = None,
     ):
         assert self.project_root is not None
         preset = self.preset_def
@@ -340,12 +364,14 @@ class HyperOrchestrator:
             context_suffix=context_suffix,
             prior_errors=prior_errors,
         )
-        return self.docker.run_agent(
+        outcome = self._execution_router.run_agent(
             self.project_root,
             prompt,
-            model=preset.model,
+            model=self.agent_model,
             yolo=preset.yolo,
         )
+        self._record_agent_checkpoint(outcome, attempt=attempt)
+        return outcome.result
 
     def _run_fast(self) -> OrchestrationResult:
         assert self.project_root is not None and self._git is not None
@@ -433,6 +459,7 @@ class HyperOrchestrator:
             agent_result = self._run_preset_agent(
                 self.request.task,
                 prior_errors=prior_errors,
+                attempt=attempt,
             )
 
             if not agent_result.success:
@@ -637,10 +664,11 @@ class HyperOrchestrator:
 
     def _decompose_task(self) -> TaskPlan:
         assert self.project_root is not None and self.analysis is not None
-        context = prioritize_context(
+        context = build_agent_context(
+            self.project_root,
             self.analysis.summary,
-            max_chars=6000,
             task=self.request.task,
+            preset=self.preset_def.id,
             section_priorities=self.preset_def.context_priorities or None,
         )
         base_prompt = (

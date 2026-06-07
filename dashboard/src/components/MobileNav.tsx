@@ -1,6 +1,7 @@
 "use client";
 
-import { FolderKanban, LayoutDashboard, ListTodo } from "lucide-react";
+import { FolderKanban, LayoutDashboard, ListTodo, Settings } from "lucide-react";
+import Link from "next/link";
 
 export type MobilePanel = "projects" | "tasks" | "workspace";
 
@@ -18,7 +19,7 @@ const ITEMS: { id: MobilePanel; label: string; icon: typeof FolderKanban }[] = [
 
 export function MobileNav({ active, onChange, hasWorkspace }: MobileNavProps) {
   return (
-    <nav className="mobile-nav lg:hidden">
+    <nav className="mobile-nav z-40 lg:hidden" aria-label="Main navigation">
       {ITEMS.map((item) => {
         const Icon = item.icon;
         const disabled = item.id === "workspace" && !hasWorkspace;
@@ -38,6 +39,10 @@ export function MobileNav({ active, onChange, hasWorkspace }: MobileNavProps) {
           </button>
         );
       })}
+      <Link href="/settings" className="mobile-nav-item" aria-label="Settings">
+        <Settings className="h-5 w-5" />
+        <span>Settings</span>
+      </Link>
     </nav>
   );
 }

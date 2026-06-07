@@ -48,7 +48,21 @@ export function parseLogLine(line: string): ParsedLogLine | null {
         level?: string;
         message?: string;
         logger?: string;
+        event?: string;
+        from_model?: string;
+        to_model?: string;
+        reason?: string;
       };
+      if (payload.event === "model_switch") {
+        const fromModel = payload.from_model ?? "?";
+        const toModel = payload.to_model ?? "?";
+        const reason = payload.reason ?? "agent_failure";
+        return {
+          text: `Model failover: ${fromModel} → ${toModel} (${reason})`,
+          level: "warn",
+          raw: trimmed,
+        };
+      }
       if (payload.message) {
         const level = mapLevel(payload.level ?? "INFO");
         const prefix = payload.logger ? `[${payload.logger}] ` : "";

@@ -129,7 +129,6 @@ class DockerController:
     ) -> ContainerRunResult:
         """Run cursor-agent in an ephemeral container."""
         self.ensure_base_image()
-        self._ensure_cursor_api_key()
         project_root = project_root.resolve()
 
         if not project_root.is_dir():
@@ -137,6 +136,8 @@ class DockerController:
                 f"Project root does not exist or is not a directory: {project_root}",
                 remediation="Clone the repository before running the agent container.",
             )
+
+        self._ensure_cursor_api_key()
 
         volumes = self._build_volumes(project_root)
         command = self._build_agent_command(prompt, model=model, yolo=yolo, working_dir=working_dir)

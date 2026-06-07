@@ -16,12 +16,26 @@ export interface Project {
   updated_at: string;
 }
 
+export type ModelProvider = "cursor" | "anthropic" | "openai";
+export type ModelBilling = "included" | "api_credits";
+
+export interface ModelInfo {
+  id: string;
+  label: string;
+  description: string;
+  provider: ModelProvider;
+  billing: ModelBilling;
+  presets: string[];
+  default_for?: string[];
+}
+
 export interface Job {
   job_id: string;
   project_id: number;
   status: JobStatus;
   level: string;
   preset: string;
+  model?: string | null;
   task: string;
   created_at: string;
   started_at: string | null;
@@ -47,6 +61,18 @@ export interface HealthStatus {
   worker_running: boolean;
   queued_jobs: number;
   running_jobs: number;
+  cursor_api_key?: CursorApiKeyStatus | null;
+}
+
+export interface CursorApiKeyStatus {
+  configured: boolean;
+  masked_preview: string | null;
+  updated_at: string | null;
+  source_path?: string | null;
+}
+
+export interface SettingsStatus {
+  cursor_api_key: CursorApiKeyStatus;
 }
 
 export interface CreateProjectPayload {
@@ -55,22 +81,32 @@ export interface CreateProjectPayload {
   settings?: Record<string, unknown>;
 }
 
-export interface TriggerJobPayload {
+export interface TriggerTaskRequest {
   task: string;
   level?: string;
   preset?: string;
+  model?: string;
 }
+
+/** @deprecated Use TriggerTaskRequest */
+export type TriggerJobPayload = TriggerTaskRequest;
 
 export interface AgentPresetInfo {
   id: string;
   label: string;
   description: string;
   default_level: string;
+  default_model?: string;
   capabilities: string[];
 }
 
 export interface ContinueJobPayload {
   message: string;
+  model?: string;
+}
+
+export interface AutoFixJobPayload {
+  model?: string;
 }
 
 export type TaskListFilter = "all" | "active" | "done";

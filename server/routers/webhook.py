@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from core.presets.registry import resolve_level
+from core.presets.registry import resolve_level, resolve_model
 from server.auth import verify_token
 from server.database import get_db
 from server.models import Job, JobStatus, Project
@@ -58,6 +58,7 @@ def trigger_task(
 
     preset = request.preset
     level = resolve_level(preset, request.level).name.lower()
+    model = resolve_model(preset, request.model)
 
     job_uuid = str(uuid.uuid4())
     job = Job(
@@ -66,6 +67,7 @@ def trigger_task(
         task=request.task,
         level=level,
         preset=preset,
+        model=model,
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(job_uuid)),
     )

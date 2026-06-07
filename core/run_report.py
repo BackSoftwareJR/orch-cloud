@@ -36,6 +36,7 @@ def build_run_report(
             "task": request.task,
             "level": request.level.name,
             "preset": request.preset.value,
+            "model": request.model,
             "max_debug_retries": request.max_debug_retries,
         },
         "result": {

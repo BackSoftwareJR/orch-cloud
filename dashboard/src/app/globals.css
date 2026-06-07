@@ -110,6 +110,46 @@ body {
     @apply text-accent-glow;
   }
 
+  .trigger-modal {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0));
+  }
+
+  .preset-grid {
+    @apply grid grid-cols-2 gap-2;
+  }
+
+  .preset-card {
+    @apply min-h-[4.5rem] rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-3 text-left transition active:scale-[0.98];
+  }
+
+  .preset-card-active {
+    @apply border-accent/50 bg-accent/15;
+  }
+
+  .model-select-wrap {
+    @apply relative;
+  }
+
+  .model-select {
+    @apply w-full appearance-none rounded-2xl border border-white/10 bg-black/30 py-3 pl-4 pr-10 text-sm text-zinc-100 outline-none ring-accent/40 transition focus:ring-2;
+  }
+
+  .model-select-chevron {
+    @apply pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500;
+  }
+
+  .model-hint {
+    @apply flex items-start gap-2 rounded-xl border px-3 py-2 text-[11px] leading-relaxed;
+  }
+
+  .model-hint-cursor {
+    @apply border-emerald-500/20 bg-emerald-500/5 text-emerald-100/90;
+  }
+
+  .model-hint-api {
+    @apply border-amber-500/20 bg-amber-500/5 text-amber-100/90;
+  }
+
 }
 
 .scrollbar-thin,

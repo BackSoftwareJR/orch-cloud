@@ -48,3 +48,15 @@ def test_build_command_max_retries_override() -> None:
     )
     retries_idx = cmd.index("--max-retries")
     assert cmd[retries_idx + 1] == "8"
+
+
+def test_build_command_includes_model_flag() -> None:
+    cmd = build_command(
+        "https://github.com/org/repo.git",
+        "Fix bug",
+        "medium",
+        "general",
+    )
+    assert "--model" in cmd
+    model_idx = cmd.index("--model")
+    assert cmd[model_idx + 1] == "composer-2.5"

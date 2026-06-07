@@ -49,3 +49,5 @@ def _migrate_schema() -> None:
             conn.exec_driver_sql(
                 "ALTER TABLE jobs ADD COLUMN preset VARCHAR(32) NOT NULL DEFAULT 'general'"
             )
+        if "model" not in existing:
+            conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN model VARCHAR(64)")

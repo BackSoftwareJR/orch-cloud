@@ -1,12 +1,17 @@
+import { FALLBACK_MODELS, mapModelResponses, type ModelResponseDto } from "./models";
 import type {
   AgentPresetInfo,
+  AutoFixJobPayload,
   ContinueJobPayload,
   CreateProjectPayload,
+  CursorApiKeyStatus,
   HealthStatus,
   Job,
   JobMessage,
+  ModelInfo,
   Project,
-  TriggerJobPayload,
+  SettingsStatus,
+  TriggerTaskRequest,
 } from "./types";
 
 const SERVER_API_URL =
@@ -22,6 +27,17 @@ export function getApiBaseUrl(): string {
   return SERVER_API_URL;
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const token =
+    (typeof window !== "undefined"
+      ? process.env.NEXT_PUBLIC_ORCHESTRATOR_API_TOKEN
+      : process.env.ORCHESTRATOR_API_TOKEN) ?? "";
+  if (!token) {
+    return {};
+  }
+  return { Authorization: `Bearer ${token}` };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const apiUrl = getApiBaseUrl();
   const target = `${apiUrl}${path}`;
@@ -31,6 +47,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...getAuthHeaders(),
       ...(init?.headers ?? {}),
     },
     cache: "no-store",
@@ -80,6 +97,33 @@ export async function fetchPresets(): Promise<AgentPresetInfo[]> {
   return request<AgentPresetInfo[]>("/presets");
 }
 
+export async function fetchModels(): Promise<ModelInfo[]> {
+  const apiUrl = getApiBaseUrl();
+  const target = `${apiUrl}/models`;
+
+  try {
+    const response = await fetch(target, {
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+    });
+
+    if (response.status === 404) {
+      return FALLBACK_MODELS;
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(body || `Request failed: ${response.status}`);
+    }
+
+    const data = (await response.json()) as ModelResponseDto[];
+    const mapped = mapModelResponses(data);
+    return mapped.length > 0 ? mapped : FALLBACK_MODELS;
+  } catch {
+    return FALLBACK_MODELS;
+  }
+}
+
 export async function fetchJobs(params?: {
   project_id?: number;
   status?: string;
@@ -99,7 +143,7 @@ export async function fetchJob(jobId: string): Promise<Job> {
 
 export async function triggerJob(
   projectId: number,
-  payload: TriggerJobPayload,
+  payload: TriggerTaskRequest,
 ): Promise<Job> {
   return request<Job>(`/projects/${projectId}/jobs`, {
     method: "POST",
@@ -130,6 +174,28 @@ export async function continueJob(jobId: string, payload: ContinueJobPayload): P
   });
 }
 
-export async function autoFixJob(jobId: string): Promise<Job> {
-  return request<Job>(`/jobs/${jobId}/auto-fix`, { method: "POST" });
+export async function autoFixJob(
+  jobId: string,
+  payload?: AutoFixJobPayload,
+): Promise<Job> {
+  const init: RequestInit = { method: "POST" };
+  if (payload) {
+    init.body = JSON.stringify(payload);
+  }
+  return request<Job>(`/jobs/${jobId}/auto-fix`, init);
+}
+
+export async function fetchSettings(): Promise<SettingsStatus> {
+  return request<SettingsStatus>("/settings");
+}
+
+export async function updateCursorApiKey(apiKey: string): Promise<CursorApiKeyStatus> {
+  return request<CursorApiKeyStatus>("/settings/cursor-api-key", {
+    method: "PUT",
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+}
+
+export async function clearCursorApiKey(): Promise<void> {
+  await request<void>("/settings/cursor-api-key", { method: "DELETE" });
 }

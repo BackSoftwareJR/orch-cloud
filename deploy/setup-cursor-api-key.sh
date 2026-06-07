@@ -34,6 +34,7 @@ if [[ ! -f "$PROJECT_ENV" ]]; then
 fi
 
 echo
-echo "Restarting orchestrator-api..."
-sudo systemctl restart orchestrator-api
-echo "Done. Run: ./deploy/diagnose.sh"
+echo "Done. Key saved — no service restart required."
+echo "New jobs will use this key immediately; running jobs keep the previous key."
+echo "You can also update the key from the dashboard Settings page."
+echo "Run: ./deploy/diagnose.sh"

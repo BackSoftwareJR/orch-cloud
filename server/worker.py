@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 from core.models import AgentPreset
 from server.config import PROJECT_ROOT, get_max_concurrent_jobs
 from server.database import SessionLocal
-from server.job_service import record_job_outcome
+from server.job_service import add_system_message, record_job_outcome
 from server.models import Job, JobStatus, Project
 from server.orchestrator import build_command, job_log_path, write_log_header
 from server.webhook_callback import notify_job_finished
@@ -42,11 +43,38 @@ def _fetch_next_queued(db: Session, limit: int) -> list[Job]:
     )
 
 
+def _handle_log_line(db: Session, job_id: str, line: str) -> None:
+    """Detect structured orchestrator events and mirror them to job messages."""
+    trimmed = line.strip()
+    if not trimmed.startswith("{"):
+        return
+    try:
+        payload = json.loads(trimmed)
+    except json.JSONDecodeError:
+        return
+    if payload.get("event") != "model_switch":
+        return
+    from_model = payload.get("from_model", "?")
+    to_model = payload.get("to_model", "?")
+    reason = payload.get("reason", "agent_failure")
+    add_system_message(
+        db,
+        job_id,
+        f"Model failover: {from_model} → {to_model} ({reason})",
+    )
+
+
 async def _run_subprocess(
-    job_id: str, repo_url: str, task: str, level: str, preset: str, log_path_str: str
+    job_id: str,
+    repo_url: str,
+    task: str,
+    level: str,
+    preset: str,
+    model: str | None,
+    log_path_str: str,
 ) -> None:
     log_path = job_log_path(job_id)
-    cmd = build_command(repo_url, task, level, preset)
+    cmd = build_command(repo_url, task, level, preset, model=model)
     started_at = _utcnow()
     write_log_header(log_path, cmd, started_at)
 
@@ -61,13 +89,19 @@ async def _run_subprocess(
             stderr=asyncio.subprocess.STDOUT,
         )
         assert proc.stdout is not None
-        with log_path.open("a", encoding="utf-8") as log_file:
-            async for raw_line in proc.stdout:
-                line = raw_line.decode("utf-8", errors="replace")
-                log_file.write(line)
-                log_file.flush()
-            exit_code = await proc.wait()
-            log_file.write(f"\n\nExit code: {exit_code}\n")
+        db = SessionLocal()
+        try:
+            with log_path.open("a", encoding="utf-8") as log_file:
+                async for raw_line in proc.stdout:
+                    line = raw_line.decode("utf-8", errors="replace")
+                    log_file.write(line)
+                    log_file.flush()
+                    _handle_log_line(db, job_id, line)
+                exit_code = await proc.wait()
+                log_file.write(f"\n\nExit code: {exit_code}\n")
+            db.commit()
+        finally:
+            db.close()
     except Exception as exc:
         logger.exception("Job %s failed with exception", job_id)
         error_message = str(exc)
@@ -139,13 +173,22 @@ async def _dispatch_job(job: Job) -> None:
         task = db_job.task
         level = db_job.level
         preset = AgentPreset.to_value(db_job.preset)
+        model = db_job.model
         job_id = db_job.job_id
     finally:
         db.close()
 
-    logger.info("Starting job %s for project_id=%s preset=%s", job_id, job.project_id, preset)
+    logger.info(
+        "Starting job %s for project_id=%s preset=%s model=%s",
+        job_id,
+        job.project_id,
+        preset,
+        model,
+    )
     _running_job_ids.add(job_id)
-    asyncio.create_task(_run_subprocess(job_id, repo_url, task, level, preset, log_path_str))
+    asyncio.create_task(
+        _run_subprocess(job_id, repo_url, task, level, preset, model, log_path_str)
+    )
 
 
 async def worker_loop() -> None:

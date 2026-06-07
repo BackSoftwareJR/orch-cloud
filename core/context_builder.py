@@ -2,11 +2,58 @@
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
+
+from core.models import AgentPreset
+from core.repo_map import format_repo_map_summary, get_repo_map
 
 _SECTION_HEADER = re.compile(r"^## (.+)$", re.MULTILINE)
 
 # Priority order for sections when truncating context
+DEFAULT_CONTEXT_BUDGET = 6000
+REPO_MAP_PROMPT_BUDGET = 1800
+SLIM_CONTEXT_MAP_BUDGET = 2500
+
+
+def is_slim_context_enabled() -> bool:
+    """Return True when SLIM_CONTEXT skips heavy analyzer excerpts."""
+    return os.environ.get("SLIM_CONTEXT", "").strip().lower() in ("1", "true", "yes")
+
+
+def build_agent_context(
+    project_root: Path,
+    analysis_summary: str,
+    *,
+    task: str = "",
+    preset: AgentPreset | str | None = None,
+    section_priorities: dict[str, int] | None = None,
+    max_chars: int = DEFAULT_CONTEXT_BUDGET,
+) -> str:
+    """Combine compact repo map with prioritized analyzer context."""
+    repo_map = get_repo_map(project_root)
+    map_budget = SLIM_CONTEXT_MAP_BUDGET if is_slim_context_enabled() else REPO_MAP_PROMPT_BUDGET
+    map_excerpt = format_repo_map_summary(
+        repo_map,
+        preset=preset,
+        max_chars=map_budget,
+    )
+    map_block = f"## Repository map\n\n{map_excerpt}"
+
+    if is_slim_context_enabled():
+        return map_block
+
+    remaining = max(max_chars - len(map_block) - 2, 800)
+    context_excerpt = prioritize_context(
+        analysis_summary,
+        max_chars=remaining,
+        task=task,
+        section_priorities=section_priorities,
+    )
+    return f"{map_block}\n\n## Project context\n\n{context_excerpt}"
+
+
 _SECTION_PRIORITY = {
     "laravel overview": 1,
     "next.js overview": 1,

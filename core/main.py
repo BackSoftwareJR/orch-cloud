@@ -10,7 +10,7 @@ from pathlib import Path
 from core.logging_config import configure_logging, new_correlation_id
 from core.models import AgentPreset, TaskRequest
 from core.orchestrator import HyperOrchestrator
-from core.presets.registry import resolve_level
+from core.presets.registry import resolve_level, resolve_model
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--preset",
         default="general",
         help="Agent preset: general, ux, backend, bugfix (default: general)",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Cursor agent model slug (default: preset-specific model)",
     )
     parser.add_argument(
         "--level",
@@ -96,11 +101,19 @@ def parse_args(argv: list[str] | None = None) -> TaskRequest:
     except ValueError as exc:
         parser.error(str(exc))
 
+    model: str | None = None
+    if args.model is not None and str(args.model).strip():
+        try:
+            model = resolve_model(preset, args.model)
+        except ValueError as exc:
+            parser.error(str(exc))
+
     return TaskRequest(
         repo_url=args.repo,
         task=args.task,
         level=level,
         preset=preset,
+        model=model,
         work_dir=args.work_dir,
         max_debug_retries=args.max_retries,
         openai_model=args.openai_model,

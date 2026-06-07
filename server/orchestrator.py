@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.models import AgentPreset
+from core.presets.registry import resolve_model
 from server.config import JOBS_DIR, PROJECT_ROOT, get_max_debug_retries
 
 logger = logging.getLogger(__name__)
@@ -41,9 +42,11 @@ def build_command(
     level: str,
     preset: str | AgentPreset = "general",
     *,
+    model: str | None = None,
     max_retries: int | None = None,
 ) -> list[str]:
     retries = max_retries if max_retries is not None else get_max_debug_retries()
+    resolved_model = resolve_model(preset, model)
     return resolve_orchestrator_cmd() + [
         "--repo",
         repo_url,
@@ -53,6 +56,8 @@ def build_command(
         level,
         "--preset",
         _preset_cli_value(preset),
+        "--model",
+        resolved_model,
         "--max-retries",
         str(retries),
         "--json-log",

@@ -10,8 +10,75 @@ from typing import Literal
 from core.models import AgentPreset, TaskLevel
 
 TestStrategy = Literal["skip", "run", "run_lint", "run_build", "run_focused"]
+ModelTier = Literal["composer", "api"]
 PRESET_SCHEMA_VERSION = "2.0"
 DEFAULT_AGENT_MODEL = "composer-2.5"
+
+
+@dataclass(frozen=True)
+class ModelInfo:
+    slug: str
+    label: str
+    tier: ModelTier
+    description: str
+
+
+MODEL_REGISTRY: dict[str, ModelInfo] = {
+    "composer-2.5": ModelInfo(
+        slug="composer-2.5",
+        label="Composer 2.5",
+        tier="composer",
+        description="Fast Cursor composer model for UI and general coding tasks.",
+    ),
+    "claude-4-sonnet": ModelInfo(
+        slug="claude-4-sonnet",
+        label="Claude 4 Sonnet",
+        tier="api",
+        description="Balanced reasoning model for debugging and focused fixes.",
+    ),
+    "claude-4.5-sonnet-thinking": ModelInfo(
+        slug="claude-4.5-sonnet-thinking",
+        label="Claude 4.5 Sonnet (Thinking)",
+        tier="api",
+        description="Extended reasoning for complex multi-file changes.",
+    ),
+    "claude-4.6-sonnet-medium-thinking": ModelInfo(
+        slug="claude-4.6-sonnet-medium-thinking",
+        label="Claude 4.6 Sonnet (Medium Thinking)",
+        tier="api",
+        description="Strong backend reasoning with moderate thinking depth.",
+    ),
+    "claude-4.6-opus-high-thinking": ModelInfo(
+        slug="claude-4.6-opus-high-thinking",
+        label="Claude 4.6 Opus (High Thinking)",
+        tier="api",
+        description="Deep reasoning for architecture and hard backend problems.",
+    ),
+    "claude-opus-4-7-thinking-xhigh": ModelInfo(
+        slug="claude-opus-4-7-thinking-xhigh",
+        label="Claude Opus 4.7 (XHigh Thinking)",
+        tier="api",
+        description="Maximum reasoning depth for the hardest tasks.",
+    ),
+    "claude-opus-4-8-thinking-high": ModelInfo(
+        slug="claude-opus-4-8-thinking-high",
+        label="Claude Opus 4.8 (High Thinking)",
+        tier="api",
+        description="Latest Opus with high thinking for production-grade work.",
+    ),
+    "gpt-5.3-codex": ModelInfo(
+        slug="gpt-5.3-codex",
+        label="GPT-5.3 Codex",
+        tier="api",
+        description="OpenAI Codex-class model for code generation.",
+    ),
+    "gpt-5.5-medium": ModelInfo(
+        slug="gpt-5.5-medium",
+        label="GPT-5.5 Medium",
+        tier="api",
+        description="General-purpose GPT model with balanced speed and quality.",
+    ),
+}
 
 _PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -139,6 +206,7 @@ def _build_registry() -> dict[AgentPreset, PresetDefinition]:
             output_expectations="Production-ready code aligned with project conventions.",
             quality_checklist=_GENERAL_CHECKLIST,
             test_strategy="run",
+            model="composer-2.5",
             yolo=True,
             pro_decompose_prompt=(
                 "You are a senior software architect. Break the task into atomic sequential "
@@ -158,6 +226,7 @@ def _build_registry() -> dict[AgentPreset, PresetDefinition]:
             context_priorities=_UX_PRIORITIES,
             test_strategy="run_lint",
             push_on_test_failure=True,
+            model="composer-2.5",
             yolo=True,
             allowed_file_patterns=(
                 "*.html",
@@ -194,6 +263,7 @@ def _build_registry() -> dict[AgentPreset, PresetDefinition]:
             quality_checklist=_BACKEND_CHECKLIST,
             context_priorities=_BACKEND_PRIORITIES,
             test_strategy="run",
+            model="claude-4.6-sonnet-medium-thinking",
             yolo=True,
             allowed_file_patterns=(
                 "app/**",
@@ -226,6 +296,7 @@ def _build_registry() -> dict[AgentPreset, PresetDefinition]:
             context_priorities=_BUGFIX_PRIORITIES,
             strict_by_default=True,
             test_strategy="run_focused",
+            model="claude-4-sonnet",
             yolo=False,
             forbidden_actions=(
                 "add new features beyond fixing the reported issue",
@@ -263,3 +334,27 @@ def resolve_level(
     if level_override is not None and str(level_override).strip():
         return TaskLevel.from_value(level_override)
     return get_preset(preset).default_level
+
+
+def validate_model(model: str) -> str:
+    """Return canonical model slug or raise ValueError."""
+    slug = str(model).strip()
+    if slug not in MODEL_REGISTRY:
+        allowed = ", ".join(sorted(MODEL_REGISTRY))
+        raise ValueError(f"Invalid model '{model}'. Allowed: {allowed}.")
+    return slug
+
+
+def get_model_for_preset(preset: AgentPreset | str) -> str:
+    """Return the default Cursor agent model for a preset."""
+    return get_preset(preset).model
+
+
+def resolve_model(
+    preset: AgentPreset | str,
+    model_override: str | None = None,
+) -> str:
+    """Use explicit model when provided; otherwise preset default."""
+    if model_override is not None and str(model_override).strip():
+        return validate_model(model_override)
+    return get_model_for_preset(preset)

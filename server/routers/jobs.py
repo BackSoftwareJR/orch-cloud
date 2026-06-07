@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from core.presets.registry import resolve_level
+from core.presets.registry import resolve_level, resolve_model
 from server.auth import verify_token
 from server.deps import optional_verify_token
 from server.database import get_db
@@ -48,6 +48,7 @@ def _job_to_response(job: Job, *, include_tail: bool = False) -> JobResponse:
         status=job.status,
         level=job.level,
         preset=job.preset,
+        model=job.model,
         task=job.task,
         created_at=job.created_at,
         started_at=job.started_at,
@@ -182,6 +183,7 @@ def trigger_project_job(
 
     preset = payload.preset
     level = resolve_level(preset, payload.level).name.lower()
+    model = resolve_model(preset, payload.model)
 
     job_uuid = str(uuid.uuid4())
     job = Job(
@@ -190,6 +192,7 @@ def trigger_project_job(
         task=payload.task,
         level=level,
         preset=preset,
+        model=model,
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(job_uuid)),
         thread_root_id=job_uuid,

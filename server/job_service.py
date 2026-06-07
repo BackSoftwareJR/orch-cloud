@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from core.models import AgentPreset
+from core.presets.registry import resolve_model
 from core.security import sanitize_task_prompt
 from server.models import Job, JobMessage, JobStatus, MessageRole, Project
 from server.orchestrator import job_log_path, read_log_tail
@@ -42,6 +43,11 @@ def _utcnow() -> datetime:
 def _job_preset_value(preset: str | AgentPreset | None) -> str:
     """Store and pass canonical preset strings, not enum reprs."""
     return AgentPreset.to_value(preset)
+
+
+def _job_model_value(job: Job) -> str:
+    """Return persisted model or resolve from preset for legacy rows."""
+    return resolve_model(job.preset, job.model)
 
 
 def _get_job_or_404(db: Session, job_id: str) -> Job:
@@ -240,6 +246,7 @@ def auto_fix_job(db: Session, job_id: str) -> Job:
         task=composed_task,
         level=source.level,
         preset=_job_preset_value(source.preset),
+        model=_job_model_value(source),
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(new_uuid)),
         parent_job_id=source.job_id,
@@ -273,6 +280,7 @@ def restart_job(db: Session, job_id: str) -> Job:
         task=source.task,
         level=source.level,
         preset=_job_preset_value(source.preset),
+        model=_job_model_value(source),
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(new_uuid)),
         parent_job_id=source.job_id,
@@ -347,6 +355,7 @@ def continue_job(db: Session, job_id: str, message: str) -> Job:
         task=composed_task,
         level=source.level,
         preset=_job_preset_value(source.preset),
+        model=_job_model_value(source),
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(new_uuid)),
         parent_job_id=source.job_id,

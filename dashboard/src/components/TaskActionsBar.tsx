@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import { modelLabel, resolveJobModel } from "@/lib/models";
+import { presetLabel } from "@/lib/presets";
 import type { Job } from "@/lib/types";
 
 interface TaskActionsBarProps {
@@ -73,8 +75,19 @@ export function TaskActionsBar({
     }
   }
 
+  const activeModel = resolveJobModel(job);
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-col items-end gap-2">
+      <div className="hidden flex-wrap items-center justify-end gap-1.5 text-[10px] text-zinc-500 sm:flex">
+        <span className="rounded-full border border-white/10 px-2 py-0.5">
+          {presetLabel(job.preset)}
+        </span>
+        <span className="rounded-full border border-white/10 px-2 py-0.5">
+          {modelLabel(activeModel)}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
       {isTerminal && (
         <>
           {showAutoFix && (
@@ -115,6 +128,7 @@ export function TaskActionsBar({
         </span>
       )}
       {actionError && <span className="text-xs text-red-400">{actionError}</span>}
+      </div>
     </div>
   );
 }

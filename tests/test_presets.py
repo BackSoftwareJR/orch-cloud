@@ -73,6 +73,13 @@ def test_preset_test_strategies() -> None:
     assert get_preset("general").test_strategy == "run"
 
 
+def test_preset_default_models() -> None:
+    assert get_preset("general").model == "composer-2.5"
+    assert get_preset("ux").model == "composer-2.5"
+    assert get_preset("backend").model == "claude-4.6-sonnet-medium-thinking"
+    assert get_preset("bugfix").model == "claude-4-sonnet"
+
+
 def test_task_request_accepts_preset() -> None:
     req = TaskRequest(
         repo_url="https://github.com/org/repo.git",

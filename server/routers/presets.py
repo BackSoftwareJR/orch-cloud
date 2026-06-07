@@ -16,6 +16,7 @@ def _to_response(preset) -> PresetResponse:
         label=preset.label,
         description=preset.description,
         default_level=preset.default_level.name.lower(),
+        default_model=preset.model,
         capabilities=list(preset.allowed_file_patterns) or ["general-purpose"],
         version=preset.version or PRESET_SCHEMA_VERSION,
     )

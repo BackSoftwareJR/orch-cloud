@@ -8,9 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from core.exceptions import SecurityError
 from core.models import AgentPreset, TaskLevel
-from core.presets.registry import resolve_level
+from core.presets.registry import resolve_level, validate_model
 from core.security import sanitize_task_prompt, validate_repo_url
 from server.models import JobStatus
+
+
+class CursorApiKeyStatus(BaseModel):
+    configured: bool
+    masked_preview: str | None = None
+    updated_at: datetime | None = None
+    source_path: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -18,6 +25,15 @@ class HealthResponse(BaseModel):
     worker_running: bool = True
     queued_jobs: int = 0
     running_jobs: int = 0
+    cursor_api_key: CursorApiKeyStatus | None = None
+
+
+class SettingsResponse(BaseModel):
+    cursor_api_key: CursorApiKeyStatus
+
+
+class CursorApiKeyUpdate(BaseModel):
+    api_key: str = Field(..., min_length=8, max_length=512)
 
 
 class ProjectCreate(BaseModel):
@@ -65,6 +81,7 @@ class JobCreate(BaseModel):
     task: str = Field(..., min_length=1)
     level: str | int | None = Field(default=None)
     preset: str = Field(default="general")
+    model: str | None = Field(default=None)
 
     @field_validator("task")
     @classmethod
@@ -93,12 +110,23 @@ class JobCreate(BaseModel):
             raise ValueError(str(exc)) from exc
         return str(value).strip()
 
+    @field_validator("model")
+    @classmethod
+    def validate_model_field(cls, value: str | None) -> str | None:
+        if value is None or str(value).strip() == "":
+            return None
+        try:
+            return validate_model(value)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 class PresetResponse(BaseModel):
     id: str
     label: str
     description: str
     default_level: str
+    default_model: str
     capabilities: list[str]
     version: str = "2.0"
 
@@ -115,6 +143,7 @@ class TriggerTaskRequest(BaseModel):
     task: str = Field(..., min_length=1)
     level: str | int | None = Field(default=None)
     preset: str = Field(default="general")
+    model: str | None = Field(default=None)
     project_id: int | None = None
 
     @field_validator("repo_url")
@@ -152,6 +181,16 @@ class TriggerTaskRequest(BaseModel):
             raise ValueError(str(exc)) from exc
         return str(value).strip()
 
+    @field_validator("model")
+    @classmethod
+    def validate_model_field(cls, value: str | None) -> str | None:
+        if value is None or str(value).strip() == "":
+            return None
+        try:
+            return validate_model(value)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 class TriggerTaskResponse(BaseModel):
     job_id: str
@@ -167,6 +206,7 @@ class JobResponse(BaseModel):
     status: JobStatus
     level: str
     preset: str
+    model: str | None = None
     task: str
     created_at: datetime
     started_at: datetime | None
@@ -177,6 +217,13 @@ class JobResponse(BaseModel):
     thread_root_id: str | None = None
     log_tail: str | None = None
     can_auto_fix: bool = False
+
+
+class ModelResponse(BaseModel):
+    slug: str
+    label: str
+    tier: str
+    description: str
 
 
 class JobContinueRequest(BaseModel):

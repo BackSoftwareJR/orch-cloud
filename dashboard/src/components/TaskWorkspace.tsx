@@ -16,6 +16,7 @@ import {
   requeueJob,
   restartJob,
 } from "@/lib/api";
+import { modelLabel, resolveJobModel } from "@/lib/models";
 import { presetLabel } from "@/lib/presets";
 import type { Job, JobMessage } from "@/lib/types";
 
@@ -140,6 +141,9 @@ export function TaskWorkspace({ job, onJobUpdated, onNewJob }: TaskWorkspaceProp
               <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-accent-glow">
                 {presetLabel(job.preset)}
               </span>
+              <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] tracking-wide text-zinc-400">
+                {modelLabel(resolveJobModel(job))}
+              </span>
               <span className="font-mono text-[10px] text-zinc-600">{job.job_id.slice(0, 8)}</span>
             </div>
             <p className="line-clamp-3 text-sm leading-snug text-zinc-300 lg:line-clamp-2">
@@ -153,12 +157,15 @@ export function TaskWorkspace({ job, onJobUpdated, onNewJob }: TaskWorkspaceProp
             job={job}
             busy={actionBusy}
             onAutoFix={async () => {
-              const next = await withBusy(() => autoFixJob(job.job_id));
-              onNewJob(next);
+              const next = await withBusy(() =>
+                autoFixJob(job.job_id, { model: resolveJobModel(job) }),
+              );
+              onNewJob({ ...next, model: next.model ?? resolveJobModel(job) });
             }}
             onRestart={async () => {
+              const activeModel = resolveJobModel(job);
               const next = await withBusy(() => restartJob(job.job_id));
-              onNewJob(next);
+              onNewJob({ ...next, model: next.model ?? activeModel });
             }}
             onRequeue={async () => {
               const updated = await withBusy(() => requeueJob(job.job_id));
@@ -226,8 +233,11 @@ export function TaskWorkspace({ job, onJobUpdated, onNewJob }: TaskWorkspaceProp
                 : "Queued — waiting for worker"
           }
           onSubmit={async (message) => {
-            const next = await withBusy(() => continueJob(job.job_id, { message }));
-            onNewJob(next);
+            const activeModel = resolveJobModel(job);
+            const next = await withBusy(() =>
+              continueJob(job.job_id, { message, model: activeModel }),
+            );
+            onNewJob({ ...next, model: next.model ?? activeModel });
           }}
         />
       </div>

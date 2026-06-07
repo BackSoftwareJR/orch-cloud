@@ -59,6 +59,7 @@ class Job(Base):
     )
     level: Mapped[str] = mapped_column(String(32), nullable=False, default="medium")
     preset: Mapped[str] = mapped_column(String(32), nullable=False, default="general")
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     task: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

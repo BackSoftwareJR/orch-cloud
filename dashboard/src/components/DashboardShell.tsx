@@ -1,6 +1,7 @@
 "use client";
 
-import { Activity, Layers, Menu, Zap } from "lucide-react";
+import { Activity, Layers, Menu, Settings, Zap } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiConnectionBadge } from "@/components/ApiConnectionBadge";
@@ -142,10 +143,10 @@ export function DashboardShell() {
     }
   }
 
-  async function handleTrigger(task: string, level: string, preset: string) {
+  async function handleTrigger(task: string, level: string, preset: string, model: string) {
     if (selectedProjectId == null) return;
-    const job = await triggerJob(selectedProjectId, { task, level, preset });
-    handleNewJob(job);
+    const job = await triggerJob(selectedProjectId, { task, level, preset, model });
+    handleNewJob({ ...job, model: job.model ?? model });
     await refresh();
   }
 
@@ -158,6 +159,9 @@ export function DashboardShell() {
           <div className="mb-1 flex items-center gap-2">
             <Layers className="h-5 w-5 text-accent-glow" />
             <h1 className="text-base font-semibold tracking-tight">HyperOrchestrator</h1>
+            <Link href="/settings" className="icon-btn ml-auto" aria-label="Settings">
+              <Settings className="h-4 w-4" />
+            </Link>
           </div>
           <p className="text-xs text-zinc-500">Multi-project control</p>
         </div>

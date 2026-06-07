@@ -60,3 +60,23 @@ def get_max_debug_retries() -> int:
 
 def get_push_on_test_failure() -> bool:
     return os.environ.get("PUSH_ON_TEST_FAILURE", "false").lower() in ("1", "true", "yes")
+
+
+def get_agent_model_default() -> str:
+    """Global fallback when no preset or job model is specified."""
+    from core.presets.registry import DEFAULT_AGENT_MODEL, validate_model
+
+    raw = os.environ.get("AGENT_MODEL_DEFAULT", "").strip()
+    if not raw:
+        return DEFAULT_AGENT_MODEL
+    return validate_model(raw)
+
+
+def get_agent_env_path() -> Path:
+    """Path to agent.env used for Cursor credentials (override via AGENT_ENV_PATH)."""
+    from core.agent_env import DEFAULT_AGENT_ENV
+
+    raw = os.environ.get("AGENT_ENV_PATH", "").strip()
+    if raw:
+        return Path(raw)
+    return DEFAULT_AGENT_ENV

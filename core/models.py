@@ -81,6 +81,7 @@ class TaskRequest(BaseModel):
     task: str = Field(..., min_length=1, description="Natural-language task description")
     level: TaskLevel = TaskLevel.MEDIUM
     preset: AgentPreset = AgentPreset.GENERAL
+    model: str | None = Field(default=None, description="Cursor agent model slug override")
     work_dir: str | None = Field(default=None, description="Local clone directory")
     max_debug_retries: int = Field(default=6, ge=1, le=10)
     openai_model: str = Field(default="gpt-4o-mini")
