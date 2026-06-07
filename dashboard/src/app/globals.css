@@ -4,35 +4,130 @@
 
 :root {
   color-scheme: dark;
+  --app-bg: #0a0a0f;
+  --accent: #6366f1;
+  --accent-glow: #818cf8;
 }
 
-html,
+html {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   height: 100%;
-}
-
-body {
+  min-height: 0;
+  overflow: hidden;
   @apply bg-surface text-zinc-100 antialiased;
   font-feature-settings: "kern" 1, "liga" 1;
   letter-spacing: -0.01em;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.glass-panel {
-  @apply border border-white/[0.06] bg-surface-glass shadow-glass backdrop-blur-glass;
+@layer components {
+  .app-shell {
+    @apply flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,_rgba(99,102,241,0.14),_transparent_55%),var(--app-bg)] lg:flex-row;
+    /* Mobile bottom nav is fixed; reserve space so panels can scroll above it */
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0));
+  }
+
+  @media (min-width: 1024px) {
+    .app-shell {
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+  }
+
+  .workspace-main {
+    @apply flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden;
+  }
+
+  .workspace-scroll {
+    @apply min-h-0 flex-1 basis-0 overflow-y-auto overscroll-contain;
+  }
+
+  .glass-panel {
+    @apply border border-white/[0.06] bg-surface-glass shadow-glass backdrop-blur-glass;
+  }
+
+  .top-bar {
+    @apply flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.06] px-3 py-2.5 lg:px-5 lg:py-3;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-xs font-medium text-white shadow-glow transition hover:bg-accent-glow active:scale-[0.98];
+  }
+
+  .icon-btn {
+    @apply rounded-xl border border-white/10 bg-white/[0.04] p-2 text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-200;
+  }
+
+  .empty-state-card {
+    @apply rounded-2xl border border-dashed border-white/10 px-6 py-8 lg:rounded-3xl lg:px-8 lg:py-10;
+  }
+
+  .status-badge {
+    @apply inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset;
+  }
+
+  .status-running {
+    @apply bg-sky-500/15 text-sky-300 ring-sky-500/30;
+  }
+
+  .status-queued {
+    @apply bg-amber-500/15 text-amber-300 ring-amber-500/30;
+  }
+
+  .status-completed {
+    @apply bg-emerald-500/15 text-emerald-300 ring-emerald-500/30;
+  }
+
+  .status-failed {
+    @apply bg-red-500/15 text-red-300 ring-red-500/30;
+  }
+
+  .status-cancelled {
+    @apply bg-zinc-500/15 text-zinc-300 ring-zinc-500/30;
+  }
+
+  .workspace-tab {
+    @apply flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-zinc-500 transition;
+  }
+
+  .workspace-tab-active {
+    @apply bg-white/10 text-zinc-100;
+  }
+
+  .mobile-nav {
+    @apply fixed bottom-0 left-0 right-0 z-40 flex border-t border-white/[0.08] bg-[#0c0c12]/95 backdrop-blur-xl;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .mobile-nav-item {
+    @apply flex flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-medium text-zinc-500 transition active:scale-95;
+  }
+
+  .mobile-nav-item-active {
+    @apply text-accent-glow;
+  }
+
 }
 
-.scrollbar-thin {
+.scrollbar-thin,
+.terminal-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  -webkit-overflow-scrolling: touch;
 }
 
-.scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.scrollbar-thin::-webkit-scrollbar,
+.terminal-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
 }
 
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+.scrollbar-thin::-webkit-scrollbar-thumb,
+.terminal-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
   border-radius: 999px;
 }
 
@@ -57,7 +152,7 @@ body {
 }
 
 .chat-bubble-user {
-  @apply border border-accent/20 bg-accent/10 text-zinc-100;
+  @apply border border-accent/25 bg-accent/10 text-zinc-100;
 }
 
 .chat-bubble-assistant {
@@ -66,4 +161,50 @@ body {
 
 .chat-bubble-system {
   @apply border border-amber-500/20 bg-amber-500/5 text-zinc-300;
+}
+
+.chat-live-info {
+  @apply border border-sky-500/20 bg-sky-500/5 text-sky-100;
+}
+
+.chat-live-warn {
+  @apply border border-amber-500/25 bg-amber-500/10 text-amber-100;
+}
+
+.chat-live-error {
+  @apply border border-red-500/25 bg-red-500/10 text-red-200;
+}
+
+.chat-live-success {
+  @apply border border-emerald-500/25 bg-emerald-500/10 text-emerald-100;
+}
+
+.live-feed-enter {
+  animation: live-feed-in 0.25s ease-out;
+}
+
+.live-dot {
+  @apply h-1.5 w-1.5 rounded-full bg-emerald-400;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes live-feed-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }

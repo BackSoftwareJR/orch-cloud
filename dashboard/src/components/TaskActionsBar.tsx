@@ -39,9 +39,9 @@ function ActionButton({
       : "border-white/10 bg-white/[0.03] text-zinc-300 hover:bg-white/[0.07]";
 
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`${base} ${styles}`}>
+    <button type="button" onClick={onClick} disabled={disabled} className={`${base} ${styles}`} title={label}>
       {icon}
-      {label}
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 }

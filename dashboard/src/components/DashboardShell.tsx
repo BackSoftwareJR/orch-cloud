@@ -1,8 +1,10 @@
 "use client";
 
-import { Activity, Layers, Zap } from "lucide-react";
+import { Activity, Layers, Menu, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { ApiConnectionBadge } from "@/components/ApiConnectionBadge";
+import { MobileNav, type MobilePanel } from "@/components/MobileNav";
 import { ProjectList } from "@/components/ProjectList";
 import { TaskListPanel } from "@/components/TaskListPanel";
 import { TaskWorkspace } from "@/components/TaskWorkspace";
@@ -20,6 +22,18 @@ import {
 import type { HealthStatus, Job, Project, TaskListFilter } from "@/lib/types";
 import { motion } from "framer-motion";
 
+function sidePanelClass(visible: boolean): string {
+  return visible
+    ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:flex-none lg:shrink-0"
+    : "hidden min-h-0 min-w-0 lg:flex lg:flex-none lg:shrink-0 lg:flex-col lg:overflow-hidden";
+}
+
+function workspacePanelClass(visible: boolean): string {
+  return visible
+    ? "workspace-main"
+    : "hidden min-h-0 min-w-0 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col lg:overflow-hidden";
+}
+
 export function DashboardShell() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -28,6 +42,7 @@ export function DashboardShell() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [taskFilter, setTaskFilter] = useState<TaskListFilter>("all");
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>("tasks");
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,10 +95,12 @@ export function DashboardShell() {
   useEffect(() => {
     setSelectedJobId(null);
     setSelectedJob(null);
+    setMobilePanel("tasks");
   }, [selectedProjectId]);
 
   async function handleSelectJob(jobId: string) {
     setSelectedJobId(jobId);
+    setMobilePanel("workspace");
     try {
       const detail = await fetchJob(jobId);
       setSelectedJob(detail);
@@ -104,12 +121,14 @@ export function DashboardShell() {
     setSelectedJobId(job.job_id);
     setSelectedJob(job);
     setTaskFilter("active");
+    setMobilePanel("workspace");
   }
 
   async function handleCreateProject(name: string, repoUrl: string) {
     const project = await createProject({ name, repo_url: repoUrl });
     setProjects((prev) => [...prev, project]);
     setSelectedProjectId(project.id);
+    setMobilePanel("tasks");
   }
 
   async function handleDeleteProject(id: number) {
@@ -123,95 +142,131 @@ export function DashboardShell() {
     }
   }
 
-  async function handleTrigger(task: string, level: string) {
+  async function handleTrigger(task: string, level: string, preset: string) {
     if (selectedProjectId == null) return;
-    const job = await triggerJob(selectedProjectId, { task, level });
+    const job = await triggerJob(selectedProjectId, { task, level, preset });
     handleNewJob(job);
     await refresh();
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[radial-gradient(ellipse_at_top,_rgba(99,102,241,0.12),_transparent_50%),#0a0a0f]">
-      <aside className="glass-panel flex w-[260px] shrink-0 flex-col border-r border-white/[0.06] p-4">
-        <div className="mb-6">
+    <div className="app-shell">
+      <aside
+        className={`${sidePanelClass(mobilePanel === "projects")} glass-panel w-full border-r border-white/[0.06] lg:w-[min(100%,280px)] xl:w-[300px]`}
+      >
+        <div className="border-b border-white/[0.06] p-4 lg:border-none">
           <div className="mb-1 flex items-center gap-2">
             <Layers className="h-5 w-5 text-accent-glow" />
             <h1 className="text-base font-semibold tracking-tight">HyperOrchestrator</h1>
           </div>
-          <p className="text-xs text-zinc-500">Task control center</p>
+          <p className="text-xs text-zinc-500">Multi-project control</p>
         </div>
-        <ProjectList
-          projects={projects}
-          selectedId={selectedProjectId}
-          onSelect={setSelectedProjectId}
-          onCreate={handleCreateProject}
-          onDelete={handleDeleteProject}
-        />
+        <div className="min-h-0 flex-1 overflow-hidden p-3 lg:p-4">
+          <ProjectList
+            projects={projects}
+            selectedId={selectedProjectId}
+            onSelect={(id) => {
+              setSelectedProjectId(id);
+              setMobilePanel("tasks");
+            }}
+            onCreate={handleCreateProject}
+            onDelete={handleDeleteProject}
+          />
+        </div>
       </aside>
 
       {selectedProject ? (
         <>
-          <TaskListPanel
-            jobs={jobs}
-            filter={taskFilter}
-            selectedJobId={selectedJobId}
-            onFilterChange={setTaskFilter}
-            onSelectJob={(jobId) => void handleSelectJob(jobId)}
-          />
-          <main className="flex min-w-0 flex-1 flex-col">
-            <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3">
-              <div className="min-w-0">
-                <h2 className="truncate text-sm font-semibold">{selectedProject.name}</h2>
-                <p className="truncate text-xs text-zinc-500">{selectedProject.repo_url}</p>
+          <div className={`${sidePanelClass(mobilePanel === "tasks")} lg:w-[min(100%,320px)]`}>
+            <TaskListPanel
+              jobs={jobs}
+              filter={taskFilter}
+              selectedJobId={selectedJobId}
+              onFilterChange={setTaskFilter}
+              onSelectJob={(jobId) => void handleSelectJob(jobId)}
+            />
+          </div>
+
+          <main className={workspacePanelClass(mobilePanel === "workspace")}>
+            <div className="top-bar shrink-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <button
+                  type="button"
+                  className="icon-btn lg:hidden"
+                  onClick={() => setMobilePanel("tasks")}
+                  aria-label="Back to tasks"
+                >
+                  <Menu className="h-4 w-4" />
+                </button>
+                <div className="min-w-0">
+                  <h2 className="truncate text-sm font-semibold">{selectedProject.name}</h2>
+                  <p className="truncate text-[11px] text-zinc-500">{selectedProject.repo_url}</p>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex shrink-0 items-center gap-2">
                 {health && (
-                  <div className="hidden items-center gap-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-1.5 text-[10px] text-zinc-400 sm:flex">
-                    <span className="inline-flex items-center gap-1">
-                      <Activity className="h-3 w-3 text-emerald-400" />
-                      Worker {health.worker_running ? "on" : "off"}
-                    </span>
-                    <span>{health.queued_jobs} queued</span>
-                    <span>{health.running_jobs} running</span>
+                  <div className="hidden items-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] px-2.5 py-1.5 text-[10px] text-zinc-400 sm:flex">
+                    <Activity className="h-3 w-3 text-emerald-400" />
+                    <span>{health.running_jobs} run</span>
+                    <span>{health.queued_jobs} queue</span>
                   </div>
                 )}
                 <motion.button
                   type="button"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileTap={{ scale: 0.97 }}
                   onClick={() => setModalOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-xs font-medium text-white shadow-glow hover:bg-accent-glow"
+                  className="btn-primary"
                 >
                   <Zap className="h-3.5 w-3.5" />
-                  New task
+                  <span className="hidden xs:inline">New task</span>
+                  <span className="xs:hidden">New</span>
                 </motion.button>
               </div>
             </div>
 
             {error && (
-              <div className="mx-5 mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-300">
+              <div className="mx-3 mt-2 shrink-0 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300 lg:mx-5">
                 {error}
               </div>
             )}
 
-            {loading ? (
-              <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">
-                Loading workspace…
-              </div>
-            ) : (
-              <TaskWorkspace
-                job={selectedJob}
-                onJobUpdated={handleJobUpdated}
-                onNewJob={handleNewJob}
-              />
-            )}
+            <div className="workspace-main">
+              {loading ? (
+                <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">
+                  Loading…
+                </div>
+              ) : (
+                <TaskWorkspace
+                  job={selectedJob}
+                  onJobUpdated={handleJobUpdated}
+                  onNewJob={handleNewJob}
+                />
+              )}
+            </div>
           </main>
         </>
       ) : (
-        <main className="flex flex-1 items-center justify-center text-sm text-zinc-500">
-          Add a project to start orchestrating tasks.
+        <main className="flex flex-1 items-center justify-center px-6 text-center text-sm text-zinc-500">
+          <div className="empty-state-card">
+            <p>Select or create a project to begin.</p>
+            <button
+              type="button"
+              className="btn-primary mt-4"
+              onClick={() => setMobilePanel("projects")}
+            >
+              Open projects
+            </button>
+          </div>
         </main>
       )}
+
+      <MobileNav
+        active={mobilePanel}
+        onChange={setMobilePanel}
+        hasWorkspace={Boolean(selectedJobId)}
+      />
+
+      <ApiConnectionBadge compact />
 
       <TriggerTaskModal
         open={modalOpen}

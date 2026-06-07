@@ -1,12 +1,13 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Terminal } from "lucide-react";
+import { MessageSquare, Terminal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { LiveTerminal } from "@/components/LiveTerminal";
 import { TaskActionsBar } from "@/components/TaskActionsBar";
 import { TaskChat } from "@/components/TaskChat";
 import { TaskComposer } from "@/components/TaskComposer";
+import { useJobLiveFeed } from "@/hooks/useJobLiveFeed";
 import {
   cancelJob,
   continueJob,
@@ -14,6 +15,7 @@ import {
   requeueJob,
   restartJob,
 } from "@/lib/api";
+import { presetLabel } from "@/lib/presets";
 import type { Job, JobMessage } from "@/lib/types";
 
 interface TaskWorkspaceProps {
@@ -22,26 +24,51 @@ interface TaskWorkspaceProps {
   onNewJob: (job: Job) => void;
 }
 
+type WorkspaceTab = "chat" | "terminal";
+
 function statusBadgeClass(status: Job["status"]): string {
   switch (status) {
     case "RUNNING":
-      return "bg-sky-500/15 text-sky-300 ring-sky-500/30";
+      return "status-running";
     case "QUEUED":
-      return "bg-amber-500/15 text-amber-300 ring-amber-500/30";
+      return "status-queued";
     case "COMPLETED":
-      return "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30";
+      return "status-completed";
     case "FAILED":
-      return "bg-red-500/15 text-red-300 ring-red-500/30";
+      return "status-failed";
     default:
-      return "bg-zinc-500/15 text-zinc-300 ring-zinc-500/30";
+      return "status-cancelled";
   }
+}
+
+function chatPanelClass(active: boolean): string {
+  if (active) {
+    return "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden";
+  }
+  return "hidden min-h-0 min-w-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden";
+}
+
+function terminalPanelClass(active: boolean): string {
+  const shared =
+    "min-h-0 min-w-0 flex-col overflow-hidden border-t border-white/[0.06] p-2 lg:max-h-[40vh] lg:min-h-[180px] lg:flex-none lg:p-3";
+  if (active) {
+    return `flex flex-1 ${shared}`;
+  }
+  return `hidden lg:flex ${shared}`;
 }
 
 export function TaskWorkspace({ job, onJobUpdated, onNewJob }: TaskWorkspaceProps) {
   const [messages, setMessages] = useState<JobMessage[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [terminalOpen, setTerminalOpen] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
+  const [mobileTab, setMobileTab] = useState<WorkspaceTab>("chat");
+
+  const isActive = job?.status === "RUNNING" || job?.status === "QUEUED";
+  const { feed, lines, connected, error } = useJobLiveFeed({
+    jobId: job?.job_id ?? null,
+    messages,
+    streamEnabled: isActive || Boolean(job),
+  });
 
   const loadMessages = useCallback(async (jobId: string) => {
     setLoadingMessages(true);
@@ -59,23 +86,23 @@ export function TaskWorkspace({ job, onJobUpdated, onNewJob }: TaskWorkspaceProp
       return;
     }
     void loadMessages(job.job_id);
-    setTerminalOpen(job.status === "RUNNING" || job.status === "QUEUED");
+    setMobileTab("chat");
   }, [job, loadMessages]);
 
   useEffect(() => {
     if (!job || job.status !== "RUNNING") return;
-    const interval = setInterval(() => void loadMessages(job.job_id), 4000);
+    const interval = setInterval(() => void loadMessages(job.job_id), 3000);
     return () => clearInterval(interval);
   }, [job, loadMessages]);
 
   if (!job) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
-        <div className="mb-4 rounded-3xl border border-dashed border-white/10 px-8 py-10">
-          <p className="text-sm font-medium text-zinc-300">Select a task to open the workspace</p>
-          <p className="mt-2 max-w-md text-xs leading-relaxed text-zinc-500">
-            Review conversation history, stream live logs, restart failed runs, requeue tasks,
-            or continue with follow-up instructions — Cursor-style.
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6 py-12 text-center">
+        <div className="empty-state-card">
+          <MessageSquare className="mx-auto mb-3 h-8 w-8 text-accent-glow/60" />
+          <p className="text-sm font-medium text-zinc-300">Open a task to start</p>
+          <p className="mt-2 max-w-sm text-xs leading-relaxed text-zinc-500">
+            Live orchestrator updates stream into the chat. Full raw logs stay in the terminal tab.
           </p>
         </div>
       </div>
@@ -96,25 +123,29 @@ export function TaskWorkspace({ job, onJobUpdated, onNewJob }: TaskWorkspaceProp
     }
   }
 
+  const chatVisible = mobileTab === "chat";
+  const terminalVisible = mobileTab === "terminal";
+
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
-      <header className="border-b border-white/[0.06] px-5 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="shrink-0 border-b border-white/[0.06] px-4 py-3 lg:px-5 lg:py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span
-                className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${statusBadgeClass(job.status)}`}
-              >
-                {job.status}
-              </span>
+              <span className={`status-badge ${statusBadgeClass(job.status)}`}>{job.status}</span>
               <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-wider text-zinc-400">
                 {job.level}
               </span>
-              <span className="font-mono text-[10px] text-zinc-600">{job.job_id.slice(0, 8)}…</span>
+              <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-accent-glow">
+                {presetLabel(job.preset)}
+              </span>
+              <span className="font-mono text-[10px] text-zinc-600">{job.job_id.slice(0, 8)}</span>
             </div>
-            <p className="line-clamp-2 text-sm text-zinc-300">{job.task.split("\n")[0]}</p>
+            <p className="line-clamp-3 text-sm leading-snug text-zinc-300 lg:line-clamp-2">
+              {job.task.split("\n")[0]}
+            </p>
             {job.error_message && (
-              <p className="mt-2 text-xs text-red-400">{job.error_message}</p>
+              <p className="mt-2 text-xs leading-relaxed text-red-400">{job.error_message}</p>
             )}
           </div>
           <TaskActionsBar
@@ -136,47 +167,65 @@ export function TaskWorkspace({ job, onJobUpdated, onNewJob }: TaskWorkspaceProp
             }}
           />
         </div>
+
+        <div className="mt-3 flex gap-1 rounded-xl bg-black/40 p-1 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileTab("chat")}
+            className={`workspace-tab ${chatVisible ? "workspace-tab-active" : ""}`}
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileTab("terminal")}
+            className={`workspace-tab ${terminalVisible ? "workspace-tab-active" : ""}`}
+          >
+            <Terminal className="h-3.5 w-3.5" />
+            Terminal
+          </button>
+        </div>
       </header>
 
-      <TaskChat messages={messages} loading={loadingMessages} />
+      {/* Content: chat fills remaining space; terminal gets capped height on desktop */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className={chatPanelClass(chatVisible)}>
+          <TaskChat
+            items={feed}
+            loading={loadingMessages}
+            streaming={isActive}
+            connected={connected}
+          />
+        </div>
 
-      <div className="border-t border-white/[0.06]">
-        <button
-          type="button"
-          onClick={() => setTerminalOpen((open) => !open)}
-          className="flex w-full items-center justify-between px-5 py-2.5 text-left text-xs text-zinc-400 transition hover:bg-white/[0.02]"
-        >
-          <span className="inline-flex items-center gap-2 font-medium">
-            <Terminal className="h-3.5 w-3.5" />
-            Live terminal
-          </span>
-          {terminalOpen ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronUp className="h-4 w-4" />
-          )}
-        </button>
-        {terminalOpen && (
-          <div className="h-[240px] border-t border-white/[0.04] px-3 pb-3">
-            <LiveTerminal jobId={job.job_id} title="" />
-          </div>
-        )}
+        <div className={terminalPanelClass(terminalVisible)}>
+          <LiveTerminal
+            jobId={job.job_id}
+            title="Raw terminal"
+            lines={lines}
+            connected={connected}
+            error={error}
+          />
+        </div>
       </div>
 
-      <TaskComposer
-        disabled={!canContinue || actionBusy}
-        placeholder={
-          canContinue
-            ? "Continue this task — describe what to do next…"
-            : job.status === "RUNNING"
-              ? "Agent is running… wait for completion to continue"
-              : "Task is queued — follow-up available after completion"
-        }
-        onSubmit={async (message) => {
-          const next = await withBusy(() => continueJob(job.job_id, { message }));
-          onNewJob(next);
-        }}
-      />
+      <div className="shrink-0">
+        <TaskComposer
+          disabled={!canContinue || actionBusy}
+          placeholder={
+            canContinue
+              ? "Continue this task — describe what to do next…"
+              : job.status === "RUNNING"
+                ? "Agent is running… follow-up available when done"
+                : "Queued — waiting for worker"
+          }
+          onSubmit={async (message) => {
+            const next = await withBusy(() => continueJob(job.job_id, { message }));
+            onNewJob(next);
+          }}
+        />
+      </div>
     </section>
   );
 }

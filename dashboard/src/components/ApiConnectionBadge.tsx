@@ -5,9 +5,12 @@ import { useEffect, useState } from "react";
 
 type ConnectionStatus = "checking" | "connected" | "failed";
 
-export function ApiConnectionBadge() {
+interface ApiConnectionBadgeProps {
+  compact?: boolean;
+}
+
+export function ApiConnectionBadge({ compact = false }: ApiConnectionBadgeProps) {
   const [status, setStatus] = useState<ConnectionStatus>("checking");
-  const [detail, setDetail] = useState<string>("");
   const apiUrl = getApiBaseUrl();
 
   useEffect(() => {
@@ -15,16 +18,10 @@ export function ApiConnectionBadge() {
 
     fetchHealth()
       .then(() => {
-        if (!cancelled) {
-          setStatus("connected");
-          setDetail("");
-        }
+        if (!cancelled) setStatus("connected");
       })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setStatus("failed");
-          setDetail(err instanceof Error ? err.message : "Network error");
-        }
+      .catch(() => {
+        if (!cancelled) setStatus("failed");
       });
 
     return () => {
@@ -32,27 +29,39 @@ export function ApiConnectionBadge() {
     };
   }, []);
 
-  const label =
-    status === "checking"
-      ? "Checking API…"
-      : status === "connected"
-        ? "API Connected"
-        : "API Connection Failed";
+  if (compact) {
+    return (
+      <div
+        className="fixed right-3 top-3 z-50 lg:right-4 lg:top-4"
+        title={`API: ${apiUrl} — ${status}`}
+      >
+        <span
+          className={`inline-flex h-2.5 w-2.5 rounded-full ring-2 ring-[#0a0a0f] ${
+            status === "connected"
+              ? "bg-emerald-400"
+              : status === "failed"
+                ? "bg-red-400"
+                : "bg-zinc-500 animate-pulse"
+          }`}
+        />
+      </div>
+    );
+  }
 
-  const colorClass =
-    status === "checking"
-      ? "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"
-      : status === "connected"
-        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-        : "border-red-500/30 bg-red-500/10 text-red-300";
+  const label =
+    status === "checking" ? "Checking…" : status === "connected" ? "API OK" : "API Failed";
 
   return (
     <div
-      className={`fixed bottom-4 right-4 z-50 max-w-xs rounded-xl border px-3 py-2 text-xs shadow-lg backdrop-blur-sm ${colorClass}`}
+      className={`fixed z-50 rounded-xl border px-3 py-2 text-xs shadow-lg backdrop-blur-sm ${
+        status === "connected"
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+          : status === "failed"
+            ? "border-red-500/30 bg-red-500/10 text-red-300"
+            : "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"
+      } bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 lg:bottom-4 lg:right-4`}
     >
       <span className="font-medium">{label}</span>
-      <span className="mt-0.5 block break-all opacity-80">{apiUrl}</span>
-      {detail && <span className="mt-1 block break-all opacity-70">{detail}</span>}
     </div>
   );
 }

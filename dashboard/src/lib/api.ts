@@ -1,4 +1,5 @@
 import type {
+  AgentPresetInfo,
   ContinueJobPayload,
   CreateProjectPayload,
   HealthStatus,
@@ -73,6 +74,10 @@ export async function createProject(payload: CreateProjectPayload): Promise<Proj
 
 export async function deleteProject(id: number): Promise<void> {
   await request<void>(`/projects/${id}`, { method: "DELETE" });
+}
+
+export async function fetchPresets(): Promise<AgentPresetInfo[]> {
+  return request<AgentPresetInfo[]>("/presets");
 }
 
 export async function fetchJobs(params?: {

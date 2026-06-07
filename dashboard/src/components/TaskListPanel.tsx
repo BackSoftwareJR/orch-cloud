@@ -2,6 +2,7 @@
 
 import { CheckCircle2, Circle, Clock, Loader2, XCircle } from "lucide-react";
 
+import { presetLabel } from "@/lib/presets";
 import type { Job, JobStatus, TaskListFilter } from "@/lib/types";
 
 interface TaskListPanelProps {
@@ -63,7 +64,7 @@ export function TaskListPanel({
   const visible = filterJobs(jobs, filter);
 
   return (
-    <aside className="glass-panel flex w-[300px] shrink-0 flex-col border-r border-white/[0.06]">
+    <aside className="glass-panel flex h-full min-h-0 w-full flex-col border-r border-white/[0.06] lg:w-[300px] lg:shrink-0">
       <div className="border-b border-white/[0.06] px-4 py-4">
         <h3 className="text-sm font-semibold tracking-tight">Tasks</h3>
         <p className="text-xs text-zinc-500">{visible.length} shown</p>
@@ -85,7 +86,7 @@ export function TaskListPanel({
         </div>
       </div>
 
-      <div className="scrollbar-thin flex-1 overflow-y-auto p-2">
+      <div className="scrollbar-thin flex-1 overflow-y-auto overscroll-contain p-2 touch-pan-y">
         {visible.length === 0 ? (
           <p className="px-3 py-10 text-center text-xs text-zinc-500">
             No tasks in this view.
@@ -108,6 +109,9 @@ export function TaskListPanel({
                   {job.status}
                 </span>
                 <span className="text-[10px] text-zinc-600">{job.level}</span>
+              <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-accent-glow">
+                {presetLabel(job.preset)}
+              </span>
               </div>
               <p className="line-clamp-2 text-xs leading-relaxed text-zinc-200">
                 {previewTask(job)}

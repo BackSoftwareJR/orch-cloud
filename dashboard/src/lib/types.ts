@@ -21,6 +21,7 @@ export interface Job {
   project_id: number;
   status: JobStatus;
   level: string;
+  preset: string;
   task: string;
   created_at: string;
   started_at: string | null;
@@ -55,7 +56,16 @@ export interface CreateProjectPayload {
 
 export interface TriggerJobPayload {
   task: string;
-  level: string;
+  level?: string;
+  preset?: string;
+}
+
+export interface AgentPresetInfo {
+  id: string;
+  label: string;
+  description: string;
+  default_level: string;
+  capabilities: string[];
 }
 
 export interface ContinueJobPayload {
