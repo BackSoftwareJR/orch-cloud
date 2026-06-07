@@ -211,7 +211,7 @@ def record_job_outcome(db: Session, job_id: str, *, success: bool, error_message
     if job is None or job.status == JobStatus.CANCELLED:
         return
 
-    tail = read_log_tail(job_log_path(job_id), max_lines=8)
+    tail = read_log_tail(job_log_path(job_id), max_lines=40)
     if success:
         summary = "Run completed successfully."
         if tail:

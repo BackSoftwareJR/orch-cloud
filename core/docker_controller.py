@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_IMAGE = "hyper-agent-base"
 DEFAULT_AGENT_ENV = Path("/opt/agent-orchestrator/config/agent.env")
-AGENT_BINARY = "cursor-agent"
+AGENT_BINARY = "cursor-agent-entrypoint.sh"
 
 
 @dataclass
@@ -76,20 +76,33 @@ class DockerController:
         try:
             output = self.client.containers.run(
                 self.base_image,
-                command=[AGENT_BINARY, "--version"],
+                command=["cursor-agent", "--version"],
                 remove=True,
                 detach=False,
             )
             version = output.decode("utf-8", errors="replace").strip()
-            logger.debug("%s available in image: %s", AGENT_BINARY, version)
+            logger.debug("cursor-agent available in image: %s", version)
         except DockerException as exc:
             raise DockerOrchestratorError(
-                f"Image '{self.base_image}' is missing '{AGENT_BINARY}' on PATH.",
+                f"Image '{self.base_image}' is missing 'cursor-agent' on PATH.",
                 remediation=(
                     f"Rebuild the agent image: docker build -t {self.base_image} . "
                     "(see Dockerfile in project root)."
                 ),
             ) from exc
+
+    def _ensure_cursor_api_key(self) -> None:
+        env = self._parse_env_file(self.agent_env_path)
+        if env.get("CURSOR_API_KEY"):
+            return
+        raise DockerOrchestratorError(
+            f"CURSOR_API_KEY not found in {self.agent_env_path}",
+            remediation=(
+                "Create the file with: "
+                "echo 'CURSOR_API_KEY=your_key' | sudo tee /opt/agent-orchestrator/config/agent.env "
+                "&& sudo chmod 600 /opt/agent-orchestrator/config/agent.env"
+            ),
+        )
 
     def validate_mounts(self) -> list[str]:
         """Return warnings about mount configuration."""
@@ -117,6 +130,7 @@ class DockerController:
     ) -> ContainerRunResult:
         """Run cursor-agent in an ephemeral container."""
         self.ensure_base_image()
+        self._ensure_cursor_api_key()
         project_root = project_root.resolve()
 
         if not project_root.is_dir():
@@ -129,7 +143,7 @@ class DockerController:
         command = self._build_agent_command(prompt, model=model, yolo=yolo, working_dir=working_dir)
         logger.info("Agent CLI: %s", self._format_agent_command_for_log(command))
 
-        env = {"CURSOR_AGENT_MODEL": model}
+        env = {}
         env.update(self._parse_env_file(self.agent_env_path))
         if extra_env:
             env.update(extra_env)
@@ -346,6 +360,8 @@ class DockerController:
             AGENT_BINARY,
             "-p",
             "--trust",
+            "--sandbox",
+            "disabled",
             "--workspace",
             working_dir,
             "--model",

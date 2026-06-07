@@ -17,6 +17,7 @@ from core.github_manager import GitHubManager
 from core.health import run_preflight_checks
 from core.logging_config import get_correlation_id
 from core.memory_manager import MemoryManager
+from core.security import redact_secrets
 from core.models import (
     AnalysisResult,
     AtomicTask,
@@ -310,6 +311,11 @@ class HyperOrchestrator:
         )
 
         if not result.success:
+            logger.error(
+                "Fast agent failed (exit=%s):\n%s",
+                result.exit_code,
+                redact_secrets(result.logs[-6000:] or "(empty agent logs)"),
+            )
             return OrchestrationResult(
                 success=False,
                 level=TaskLevel.FAST,
@@ -355,6 +361,12 @@ class HyperOrchestrator:
 
             if not agent_result.success:
                 prior_errors = DockerController.extract_error_signature(agent_result.logs)
+                logger.error(
+                    "Agent attempt %d failed (exit=%s):\n%s",
+                    attempt,
+                    agent_result.exit_code,
+                    redact_secrets(agent_result.logs[-6000:] or "(empty agent logs)"),
+                )
                 failure_count += 1
                 self.memory.record_attempt(
                     project_key,

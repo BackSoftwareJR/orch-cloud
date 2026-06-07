@@ -14,6 +14,8 @@ def test_build_agent_command_uses_headless_cursor_cli_flags() -> None:
     assert cmd[0] == AGENT_BINARY
     assert "-p" in cmd
     assert "--trust" in cmd
+    assert "--sandbox" in cmd
+    assert "disabled" in cmd
     assert "--workspace" in cmd
     assert "--model" in cmd
     assert "--force" in cmd

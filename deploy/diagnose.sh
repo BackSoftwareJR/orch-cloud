@@ -76,14 +76,24 @@ fi
 echo
 
 echo "==> Agent env file:"
-if [[ -f /opt/agent-orchestrator/config/agent.env ]]; then
-  if grep -q '^CURSOR_API_KEY=' /opt/agent-orchestrator/config/agent.env; then
+AGENT_ENV="/opt/agent-orchestrator/config/agent.env"
+if [[ -f "$AGENT_ENV" ]]; then
+  if grep -q '^CURSOR_API_KEY=' "$AGENT_ENV"; then
     echo "  OK — CURSOR_API_KEY set in agent.env"
+    if docker run --rm --env-file "$AGENT_ENV" hyper-agent-base \
+      cursor-agent-entrypoint.sh -p --trust --sandbox disabled --force "Reply with OK" 2>&1 | head -5 | sed 's/^/  /'; then
+      echo "  OK — cursor-agent responds inside container"
+    else
+      echo "  FAIL — cursor-agent failed inside container (check API key validity)"
+    fi
   else
-    echo "  WARNING — agent.env exists but CURSOR_API_KEY is missing"
+    echo "  FAIL — agent.env exists but CURSOR_API_KEY is missing"
   fi
 else
-  echo "  WARNING — /opt/agent-orchestrator/config/agent.env not found"
+  echo "  FAIL — $AGENT_ENV not found"
+  echo "  Fix: sudo mkdir -p /opt/agent-orchestrator/config"
+  echo "       echo 'CURSOR_API_KEY=your_key' | sudo tee $AGENT_ENV"
+  echo "       sudo chmod 600 $AGENT_ENV"
 fi
 echo
 

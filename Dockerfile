@@ -22,4 +22,7 @@ RUN curl https://cursor.com/install -fsS | bash \
     && cursor-agent --version \
     && ln -sf "$(command -v cursor-agent)" /usr/local/bin/agent
 
+COPY scripts/cursor-agent-entrypoint.sh /usr/local/bin/cursor-agent-entrypoint.sh
+RUN chmod +x /usr/local/bin/cursor-agent-entrypoint.sh
+
 WORKDIR /workspace

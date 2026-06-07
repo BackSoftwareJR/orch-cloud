@@ -92,12 +92,13 @@ def run_preflight_checks(
     # Agent env
     env_path = agent_env_path or docker.agent_env_path
     if env_path.is_file():
-        ok(f"agent.env exists at {env_path}")
+        env_vars = DockerController._parse_env_file(env_path)
+        if env_vars.get("CURSOR_API_KEY"):
+            ok(f"CURSOR_API_KEY set in {env_path}")
+        else:
+            fail("CURSOR_API_KEY", f"Missing from {env_path} — agent containers will fail immediately")
     else:
-        warn(
-            "agent.env",
-            f"Not found at {env_path} — Cursor API key may be missing in containers",
-        )
+        fail("agent.env", f"Not found at {env_path} — create it with CURSOR_API_KEY")
 
     # SSH
     ssh = ssh_dir or docker.ssh_dir
