@@ -258,3 +258,60 @@ class JobStatusResponse(BaseModel):
     exit_code: int | None = None
     created_at: str | None = None
     finished_at: str | None = None
+
+
+class ExecuteAgentRequest(BaseModel):
+    """n8n / backclub CRM payload for Hyper-bs workflow."""
+
+    dedicated_prompt: str = Field(..., min_length=1)
+    github_url: str = Field(..., min_length=1)
+    specialist_role: str | None = Field(default=None)
+    task_id: str | None = Field(default=None, description="External CRM task id")
+    project_id: str | None = Field(default=None, description="External CRM project id")
+    website_url: str | None = None
+    crm_log_url: str | None = None
+    crm_auth_token: str | None = None
+
+    @field_validator("dedicated_prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        try:
+            return sanitize_task_prompt(value)
+        except SecurityError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("github_url")
+    @classmethod
+    def validate_github(cls, value: str) -> str:
+        try:
+            return validate_repo_url(value)
+        except SecurityError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+class ExecuteAgentResponse(BaseModel):
+    status: str = "accepted"
+    task_id: str
+    run_id: str
+    queue_position: int
+    project_id: int
+    orchestrator_job_id: str
+
+
+class ApiUsageRecentCall(BaseModel):
+    id: int
+    endpoint: str
+    method: str
+    source: str
+    status_code: int
+    project_id: int | None
+    created_at: str
+
+
+class ApiUsageStatsResponse(BaseModel):
+    total: int
+    today: int
+    this_week: int
+    by_source: dict[str, int]
+    by_endpoint: dict[str, int]
+    recent: list[ApiUsageRecentCall]

@@ -51,3 +51,5 @@ def _migrate_schema() -> None:
             )
         if "model" not in existing:
             conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN model VARCHAR(64)")
+        if "metadata" not in existing:
+            conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN metadata JSON")

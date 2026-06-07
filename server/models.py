@@ -68,6 +68,7 @@ class Job(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     parent_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     thread_root_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True, default=dict)
 
     project: Mapped[Project] = relationship("Project", back_populates="jobs")
     messages: Mapped[list[JobMessage]] = relationship(
@@ -87,3 +88,15 @@ class JobMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     job: Mapped[Job] = relationship("Job", back_populates="messages")
+
+
+class ApiCallLog(Base):
+    __tablename__ = "api_call_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    endpoint: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    method: Mapped[str] = mapped_column(String(16), nullable=False, default="POST")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, index=True, default="api")
+    status_code: Mapped[int] = mapped_column(Integer, nullable=False, default=200)
+    project_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)

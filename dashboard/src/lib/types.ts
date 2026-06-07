@@ -75,6 +75,25 @@ export interface SettingsStatus {
   cursor_api_key: CursorApiKeyStatus;
 }
 
+export interface ApiUsageRecentCall {
+  id: number;
+  endpoint: string;
+  method: string;
+  source: string;
+  status_code: number;
+  project_id: number | null;
+  created_at: string;
+}
+
+export interface ApiUsageStats {
+  total: number;
+  today: number;
+  this_week: number;
+  by_source: Record<string, number>;
+  by_endpoint: Record<string, number>;
+  recent: ApiUsageRecentCall[];
+}
+
 export interface CreateProjectPayload {
   name: string;
   repo_url: string;

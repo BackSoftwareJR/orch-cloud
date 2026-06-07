@@ -2,9 +2,11 @@
 
 Production orchestrator API for **[backclub.it](https://backclub.it)** — task dispatch, specialist agents, and webhook callbacks.
 
-Base URL (API): configure per deployment (e.g. `https://orchestrator.backclub.it` or VPS `:8000`)  
-Dashboard: served from backclub.it workspace (future) or direct `:3000`  
-OpenAPI: `{BASE_URL}/docs`
+**Production VPS (backclub/orchestrator):** `http://2.24.15.210:8000`  
+Dashboard: `http://2.24.15.210:3000`  
+OpenAPI: `http://2.24.15.210:8000/docs`
+
+When a reverse proxy is configured on backclub.it, you may also use a path such as `https://orchestrator.backclub.it` — the n8n URL path below stays the same.
 
 ## Authentication
 
@@ -14,7 +16,118 @@ When `REQUIRE_API_TOKEN=true`:
 Authorization: Bearer <ORCHESTRATOR_API_TOKEN>
 ```
 
-Webhook trigger always requires a token. Optional HMAC on outbound callbacks via `WEBHOOK_SECRET`.
+**n8n / Hyper-bs workflow** — use the same token with header `X-API-Key` (preferred for n8n HTTP Request nodes):
+
+```
+X-API-Key: <ORCHESTRATOR_API_TOKEN>
+```
+
+Also accepted: `X-API-Token`, `Authorization: Bearer …`
+
+Webhook trigger and `/api/v1/execute-agent` always require a token.
+
+Optional HMAC on outbound callbacks via `WEBHOOK_SECRET`.
+
+## n8n integration — `POST /api/v1/execute-agent`
+
+Drop-in replacement for the legacy ngrok endpoint. Use this URL in your n8n HTTP Request node:
+
+```
+http://2.24.15.210:8000/api/v1/execute-agent
+```
+
+### Request
+
+Headers:
+
+| Header | Value |
+|--------|--------|
+| `Content-Type` | `application/json` |
+| `X-API-Key` | Your `ORCHESTRATOR_API_TOKEN` from the VPS `.env` |
+
+Body (JSON):
+
+```json
+{
+  "dedicated_prompt": "Implement the hero section from Figma",
+  "github_url": "https://github.com/BackSoftwareJR/villa_sole",
+  "website_url": "https://villa-sole.example.com",
+  "specialist_role": "frontend dev",
+  "task_id": "232",
+  "project_id": "crm-project-99",
+  "crm_log_url": "https://crm.example.com/tasks/232/log",
+  "crm_auth_token": "optional-crm-bearer-token"
+}
+```
+
+| Field | Required | Maps to |
+|-------|----------|---------|
+| `dedicated_prompt` | yes | Agent task text |
+| `github_url` | yes | Find or create orchestrator project by repo URL |
+| `specialist_role` | no | Agent preset (see table below) |
+| `task_id` | no | Stored as `metadata.crm_task_id` on the job |
+| `project_id` | no | External CRM project id → `metadata.crm_project_id` (not orchestrator project id) |
+| `website_url` | no | Project settings + job metadata |
+| `crm_log_url` | no | Job metadata for callbacks |
+| `crm_auth_token` | no | Job metadata (for CRM API calls from agent) |
+
+**Specialist role → preset**
+
+| CRM role (examples) | Preset |
+|---------------------|--------|
+| frontend dev, ui, ux, design | `ux` |
+| backend dev, api | `backend` |
+| bug fix, debugger | `bugfix` |
+| general, full stack | `general` |
+
+If the GitHub repo is not registered yet, a project is created automatically (`name` = repo name, `repo_url` = `github_url`).
+
+### Response
+
+```json
+{
+  "status": "accepted",
+  "task_id": "42",
+  "run_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "queue_position": 2,
+  "project_id": 5,
+  "orchestrator_job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `task_id` | Orchestrator internal job id (integer as string) |
+| `run_id` | UUID for polling logs / status (`GET /jobs/{run_id}`) |
+| `queue_position` | Position in the QUEUED queue |
+| `project_id` | Orchestrator project id (auto-created if needed) |
+
+### Example curl
+
+```bash
+curl -X POST "http://2.24.15.210:8000/api/v1/execute-agent" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ORCHESTRATOR_API_TOKEN" \
+  -d '{
+    "dedicated_prompt": "Fix mobile nav overlap",
+    "github_url": "https://github.com/BackSoftwareJR/villa_sole",
+    "specialist_role": "frontend dev",
+    "task_id": "232",
+    "project_id": "crm-99",
+    "website_url": "https://villa-sole.example.com"
+  }'
+```
+
+## API usage statistics
+
+Track inbound calls from n8n, webhooks, and the dashboard:
+
+```http
+GET /stats/api-usage
+```
+
+Response includes `total`, `today`, `this_week`, `by_source`, `by_endpoint`, and `recent` (last 10 calls).  
+Dashboard: **Stats** page at `/stats`.
 
 ## Agent presets (v2.0)
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from typing import Annotated
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -14,17 +13,10 @@ from server.auth import verify_token
 from server.database import get_db
 from server.models import Job, JobStatus, Project
 from server.orchestrator import job_log_path
+from server.project_service import get_or_create_project_from_github
 from server.schemas import TriggerTaskRequest, TriggerTaskResponse
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
-
-
-def _repo_name_from_url(repo_url: str) -> str:
-    path = urlparse(repo_url).path.rstrip("/")
-    if path.endswith(".git"):
-        path = path[:-4]
-    name = path.rsplit("/", 1)[-1] if path else "project"
-    return name or "project"
 
 
 def _get_or_create_project(db: Session, payload: TriggerTaskRequest) -> Project:
@@ -34,18 +26,7 @@ def _get_or_create_project(db: Session, payload: TriggerTaskRequest) -> Project:
             raise HTTPException(status_code=404, detail="Project not found")
         return project
 
-    project = db.query(Project).filter(Project.repo_url == payload.repo_url).one_or_none()
-    if project is not None:
-        return project
-
-    project = Project(
-        name=_repo_name_from_url(payload.repo_url),
-        repo_url=payload.repo_url,
-        settings={},
-    )
-    db.add(project)
-    db.flush()
-    return project
+    return get_or_create_project_from_github(db, github_url=payload.repo_url)
 
 
 @router.post("/trigger-task", response_model=TriggerTaskResponse)

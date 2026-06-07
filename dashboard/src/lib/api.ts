@@ -1,6 +1,7 @@
 import { FALLBACK_MODELS, mapModelResponses, type ModelResponseDto } from "./models";
 import type {
   AgentPresetInfo,
+  ApiUsageStats,
   AutoFixJobPayload,
   ContinueJobPayload,
   CreateProjectPayload,
@@ -198,4 +199,8 @@ export async function updateCursorApiKey(apiKey: string): Promise<CursorApiKeySt
 
 export async function clearCursorApiKey(): Promise<void> {
   await request<void>("/settings/cursor-api-key", { method: "DELETE" });
+}
+
+export async function fetchApiStats(): Promise<ApiUsageStats> {
+  return request<ApiUsageStats>("/stats/api-usage");
 }
