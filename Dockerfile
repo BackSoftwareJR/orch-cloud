@@ -19,6 +19,7 @@ RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local
 
 # Install Cursor CLI (requires glibc — Ubuntu, not Alpine)
 RUN curl https://cursor.com/install -fsS | bash \
-    && cursor-agent --version
+    && cursor-agent --version \
+    && ln -sf "$(command -v cursor-agent)" /usr/local/bin/agent
 
 WORKDIR /workspace

@@ -126,7 +126,8 @@ class DockerController:
             )
 
         volumes = self._build_volumes(project_root)
-        command = self._build_agent_command(prompt, model=model, yolo=yolo)
+        command = self._build_agent_command(prompt, model=model, yolo=yolo, working_dir=working_dir)
+        logger.info("Agent CLI: %s", self._format_agent_command_for_log(command))
 
         env = {"CURSOR_AGENT_MODEL": model}
         env.update(self._parse_env_file(self.agent_env_path))
@@ -179,6 +180,15 @@ class DockerController:
                     success,
                     duration,
                 )
+                if not success or int(exit_code) != 0:
+                    snippet = redact_secrets(logs.strip() or "(no container output)")
+                    if len(snippet) > 4000:
+                        snippet = snippet[-4000:]
+                    logger.error(
+                        "Agent container output (exit=%s):\n%s",
+                        exit_code,
+                        snippet,
+                    )
                 return ContainerRunResult(
                     exit_code=int(exit_code),
                     logs=logs,
@@ -324,12 +334,36 @@ class DockerController:
         return base_mode
 
     @staticmethod
-    def _build_agent_command(prompt: str, *, model: str, yolo: bool) -> list[str]:
-        args = [AGENT_BINARY, "--model", model]
-        if yolo:
-            args.append("--yolo")
-        args.extend(["--prompt", prompt])
+    def _build_agent_command(
+        prompt: str,
+        *,
+        model: str,
+        yolo: bool,
+        working_dir: str = "/workspace",
+    ) -> list[str]:
+        """Build a headless Cursor CLI invocation for Docker (see cursor.com/docs/cli/headless)."""
+        args = [
+            AGENT_BINARY,
+            "-p",
+            "--trust",
+            "--workspace",
+            working_dir,
+            "--model",
+            model,
+        ]
+        # Automated orchestration must apply edits without interactive approval.
+        args.append("--force")
+        args.append(prompt)
         return args
+
+    @staticmethod
+    def _format_agent_command_for_log(command: list[str]) -> str:
+        if len(command) < 2:
+            return " ".join(command)
+        prompt = command[-1]
+        prefix = command[:-1]
+        preview = prompt if len(prompt) <= 120 else f"{prompt[:117]}…"
+        return f"{' '.join(prefix)} {preview!r}"
 
     def _cleanup_container(self, container: Container) -> None:
         try:

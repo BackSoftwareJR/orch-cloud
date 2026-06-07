@@ -83,8 +83,8 @@ hyper-orchestrator --repo <url> --task "test" --level pro --dry-run
 
 | Level | Alias | Behavior |
 |-------|-------|----------|
-| 1 | `fast`, `l1`, `level1` | `cursor-agent --model composer-2.5`, strict minimal fix, push immediately, no test loop |
-| 2 | `medium`, `l2`, `level2` | `--yolo` agent, run tests, auto-debug on failure, push only when tests pass |
+| 1 | `fast`, `l1`, `level1` | Headless `cursor-agent -p --force`, strict minimal fix, push immediately, no test loop |
+| 2 | `medium`, `l2`, `level2` | Headless agent with `--force`, run tests, auto-debug on failure, push only when tests pass |
 | 3 | `pro`, `l3`, `level3` | Master AI decomposes into JSON atomic tasks, sequential fresh containers, validates each step |
 
 ### Options

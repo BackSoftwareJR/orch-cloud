@@ -21,6 +21,11 @@ _FAILURE_MARKERS = (
     "command not found",
     "rate limit",
     "authentication failed",
+    "unknown flag",
+    "unknown option",
+    "invalid argument",
+    "not authenticated",
+    "api key",
 )
 
 _COMPLETION_PATTERN = re.compile(
