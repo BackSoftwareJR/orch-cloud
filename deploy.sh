@@ -17,21 +17,18 @@ if [[ -f "$ROOT_DIR/.env" ]]; then
   source "$ROOT_DIR/.env"
   set +a
 else
-  echo "WARNING: $ROOT_DIR/.env not found — NEXT_PUBLIC_API_URL may be unset at build time."
+  echo "WARNING: $ROOT_DIR/.env not found."
 fi
 
-if [[ -z "${NEXT_PUBLIC_API_URL:-}" ]]; then
-  echo "WARNING: NEXT_PUBLIC_API_URL is not set; dashboard will fall back to http://localhost:8000"
-else
-  echo "==> NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL"
-fi
+export INTERNAL_API_URL="${INTERNAL_API_URL:-http://127.0.0.1:8000}"
+echo "==> INTERNAL_API_URL=$INTERNAL_API_URL (Next.js proxy target)"
 
 echo "==> Installing dashboard dependencies..."
 cd dashboard
 npm install --legacy-peer-deps
 
-echo "==> Building dashboard (embedding NEXT_PUBLIC_API_URL)..."
-export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://localhost:8000}"
+echo "==> Building dashboard with API proxy (/api-backend → $INTERNAL_API_URL)..."
+export INTERNAL_API_URL
 npm run build
 cd "$ROOT_DIR"
 

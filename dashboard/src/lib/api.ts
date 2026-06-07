@@ -6,11 +6,25 @@ import type {
   TriggerJobPayload,
 } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const SERVER_API_URL =
+  process.env.INTERNAL_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://127.0.0.1:8000";
+
+/** Browser uses same-origin proxy; server-side calls hit the API directly. */
+export function getApiBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    return "/api-backend";
+  }
+  return SERVER_API_URL;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  console.log("Fetching from:", process.env.NEXT_PUBLIC_API_URL ?? API_URL);
-  const response = await fetch(`${API_URL}${path}`, {
+  const apiUrl = getApiBaseUrl();
+  const target = `${apiUrl}${path}`;
+  console.log("Fetching from:", target);
+
+  const response = await fetch(target, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -31,12 +45,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function getApiBaseUrl(): string {
-  return API_URL;
-}
-
 export function getWebSocketUrl(jobId: string): string {
-  const base = API_URL.replace(/^http/, "ws");
+  if (typeof window !== "undefined") {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${window.location.host}/api-backend/ws/logs/${jobId}`;
+  }
+  const base = SERVER_API_URL.replace(/^http/, "ws");
   return `${base}/ws/logs/${jobId}`;
 }
 

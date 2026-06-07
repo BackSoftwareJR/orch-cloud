@@ -10,6 +10,7 @@ WorkingDirectory=/opt/orch-cloud/dashboard
 EnvironmentFile=-/opt/orch-cloud/.env
 Environment=NODE_ENV=production
 Environment=PORT=3000
+Environment=INTERNAL_API_URL=http://127.0.0.1:8000
 ExecStart=/usr/bin/npm run start
 Restart=always
 RestartSec=5

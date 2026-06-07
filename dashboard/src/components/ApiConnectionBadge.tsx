@@ -7,6 +7,7 @@ type ConnectionStatus = "checking" | "connected" | "failed";
 
 export function ApiConnectionBadge() {
   const [status, setStatus] = useState<ConnectionStatus>("checking");
+  const [detail, setDetail] = useState<string>("");
   const apiUrl = getApiBaseUrl();
 
   useEffect(() => {
@@ -14,10 +15,16 @@ export function ApiConnectionBadge() {
 
     fetchHealth()
       .then(() => {
-        if (!cancelled) setStatus("connected");
+        if (!cancelled) {
+          setStatus("connected");
+          setDetail("");
+        }
       })
-      .catch(() => {
-        if (!cancelled) setStatus("failed");
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setStatus("failed");
+          setDetail(err instanceof Error ? err.message : "Network error");
+        }
       });
 
     return () => {
@@ -41,11 +48,11 @@ export function ApiConnectionBadge() {
 
   return (
     <div
-      className={`fixed bottom-4 right-4 z-50 rounded-xl border px-3 py-2 text-xs shadow-lg backdrop-blur-sm ${colorClass}`}
-      title={`Target: ${apiUrl}`}
+      className={`fixed bottom-4 right-4 z-50 max-w-xs rounded-xl border px-3 py-2 text-xs shadow-lg backdrop-blur-sm ${colorClass}`}
     >
       <span className="font-medium">{label}</span>
-      <span className="mt-0.5 block text-[10px] opacity-80">{apiUrl}</span>
+      <span className="mt-0.5 block break-all opacity-80">{apiUrl}</span>
+      {detail && <span className="mt-1 block break-all opacity-70">{detail}</span>}
     </div>
   );
 }

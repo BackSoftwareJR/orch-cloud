@@ -13,6 +13,7 @@ import {
   fetchHealth,
   fetchJobs,
   fetchProjects,
+  getApiBaseUrl,
   triggerJob,
 } from "@/lib/api";
 import type { HealthStatus, Job, Project } from "@/lib/types";
@@ -50,7 +51,8 @@ export function DashboardShell() {
       }
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load dashboard");
+      const message = err instanceof Error ? err.message : "Failed to load dashboard";
+      setError(`${message} → ${getApiBaseUrl()}`);
     } finally {
       setLoading(false);
     }
