@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from core.exceptions import SecurityError
+from core.models import TaskRequest
 from server.database import Base
 from server.job_service import (
     auto_fix_job,
+    build_continuation_task,
     can_auto_fix_job,
     cancel_job,
     continue_job,
+    extract_test_errors_from_log,
     get_job_messages,
     requeue_job,
     restart_job,
 )
-from server.models import Job, JobStatus, Project
+from server.models import Job, JobMessage, JobStatus, MessageRole, Project
 
 
 def _session() -> Session:
@@ -110,3 +115,63 @@ def test_auto_fix_job_creates_continuation() -> None:
     assert fixed.status == JobStatus.QUEUED
     assert fixed.parent_job_id == source.job_id
     assert "Auto-fix" in fixed.task or "auto-fix" in fixed.task.lower()
+
+
+def test_build_continuation_task_stays_under_limit_with_long_history() -> None:
+    db = _session()
+    job = _seed_project_and_job(db, status=JobStatus.FAILED)
+    job.task = "Fix authentication " + ("a" * 4000)
+    db.commit()
+
+    for index in range(50):
+        db.add(
+            JobMessage(
+                job_id=job.job_id,
+                role=MessageRole.USER if index % 2 == 0 else MessageRole.SYSTEM,
+                content=f"Message {index}: " + ("x" * 600),
+            )
+        )
+    db.commit()
+
+    follow_up = "Please fix the remaining issues " + ("y" * 3000)
+    task = build_continuation_task(db, job, follow_up)
+
+    assert len(task) <= 8000
+    TaskRequest(repo_url="https://github.com/org/demo.git", task=task)
+
+
+def test_auto_fix_task_passes_cli_validation_with_large_log() -> None:
+    db = _session()
+    source = _seed_project_and_job(db, status=JobStatus.FAILED)
+    source.error_message = "Medium task failed after 6 attempts"
+    db.commit()
+
+    from server.orchestrator import job_log_path
+
+    log_path = job_log_path(source.job_id)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        "Validation failed:\n"
+        + "\n".join(f"FAIL test_case_{index}: assertion error" for index in range(500))
+        + "\n"
+    )
+
+    fixed = auto_fix_job(db, source.job_id)
+    assert len(fixed.task) <= 8000
+    TaskRequest(repo_url="https://github.com/org/demo.git", task=fixed.task)
+
+
+def test_extract_test_errors_from_log_caps_output() -> None:
+    log_text = "Validation failed:\n" + "\n".join(
+        f"error: line {index}" for index in range(500)
+    )
+    excerpt = extract_test_errors_from_log(log_text)
+    assert len(excerpt) <= 2000
+    assert "error:" in excerpt
+
+
+def test_continue_job_rejects_oversized_follow_up() -> None:
+    db = _session()
+    source = _seed_project_and_job(db, status=JobStatus.FAILED)
+    with pytest.raises(SecurityError):
+        continue_job(db, source.job_id, "z" * 9000)

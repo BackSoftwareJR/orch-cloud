@@ -28,6 +28,11 @@ _TEST_FAILURE_MARKERS = (
     "error:",
 )
 
+# Must stay within core.security.sanitize_task_prompt default (CLI TaskRequest limit).
+_MAX_CONTINUATION_LENGTH = 8000
+_MAX_HISTORY_MESSAGES = 10
+_MAX_ERROR_EXCERPT_CHARS = 2000
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -87,6 +92,15 @@ def get_job_messages(db: Session, job_id: str) -> list[JobMessage]:
     )
 
 
+def _truncate_with_ellipsis(text: str, max_chars: int) -> str:
+    cleaned = text.strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    if max_chars <= 3:
+        return cleaned[:max_chars]
+    return cleaned[: max_chars - 3].rstrip() + "..."
+
+
 def build_continuation_task(db: Session, job: Job, follow_up: str) -> str:
     root = _thread_root_id(job)
     history = (
@@ -97,24 +111,66 @@ def build_continuation_task(db: Session, job: Job, follow_up: str) -> str:
         .all()
     )
 
-    lines = [
-        "You are continuing a previous orchestration run on this repository.",
-        f"\nOriginal task:\n{job.task}",
-    ]
-    if history:
-        lines.append("\nConversation history:")
-        for message in history:
-            label = message.role.value.capitalize()
-            lines.append(f"[{label}]: {message.content}")
-    lines.append(f"\nFollow-up instruction:\n{follow_up.strip()}")
-    lines.append(
+    follow_up_text = follow_up.strip()
+    header = "You are continuing a previous orchestration run on this repository."
+    footer = (
         "\nContinue from the previous work. Inspect the current repo state, "
         "respect prior changes, and address the follow-up."
     )
-    return sanitize_task_prompt("\n".join(lines), max_length=12000)
+
+    max_messages = min(_MAX_HISTORY_MESSAGES, len(history)) if history else 0
+    per_message_cap = 500
+    original_cap = 1500
+    follow_up_cap = 2000
+
+    while True:
+        recent = history[-max_messages:] if max_messages else []
+        history_lines = [
+            f"[{message.role.value.capitalize()}]: "
+            f"{_truncate_with_ellipsis(message.content, per_message_cap)}"
+            for message in recent
+        ]
+        original = _truncate_with_ellipsis(job.task, original_cap)
+        follow = _truncate_with_ellipsis(follow_up_text, follow_up_cap)
+
+        parts = [header, f"\nOriginal task:\n{original}"]
+        if history_lines:
+            parts.append("\nConversation history (most recent):")
+            parts.extend(history_lines)
+        parts.append(f"\nFollow-up instruction:\n{follow}")
+        parts.append(footer)
+        composed = "\n".join(parts)
+
+        if len(composed) <= _MAX_CONTINUATION_LENGTH:
+            return sanitize_task_prompt(composed)
+
+        if max_messages > 0:
+            max_messages -= 1
+            continue
+        if per_message_cap > 100:
+            per_message_cap = max(100, per_message_cap // 2)
+            max_messages = min(_MAX_HISTORY_MESSAGES, len(history)) if history else 0
+            continue
+        if follow_up_cap > 200:
+            follow_up_cap = max(200, follow_up_cap // 2)
+            max_messages = min(_MAX_HISTORY_MESSAGES, len(history)) if history else 0
+            continue
+        if original_cap > 200:
+            original_cap = max(200, original_cap // 2)
+            max_messages = min(_MAX_HISTORY_MESSAGES, len(history)) if history else 0
+            continue
+
+        return sanitize_task_prompt(
+            _truncate_with_ellipsis(composed, _MAX_CONTINUATION_LENGTH)
+        )
 
 
-def extract_test_errors_from_log(log_text: str | None, *, max_lines: int = 120) -> str:
+def extract_test_errors_from_log(
+    log_text: str | None,
+    *,
+    max_lines: int = 80,
+    max_chars: int = _MAX_ERROR_EXCERPT_CHARS,
+) -> str:
     if not log_text:
         return "No log output available — inspect the repository and fix failing checks."
 
@@ -126,7 +182,9 @@ def extract_test_errors_from_log(log_text: str | None, *, max_lines: int = 120) 
     ]
     selected = error_lines[-max_lines:] if error_lines else lines[-max_lines:]
     excerpt = "\n".join(selected).strip()
-    return excerpt[:8000] if excerpt else "\n".join(lines[-max_lines:]).strip()[:8000]
+    if not excerpt:
+        excerpt = "\n".join(lines[-max_lines:]).strip()
+    return _truncate_with_ellipsis(excerpt, max_chars)
 
 
 def can_auto_fix_job(job: Job) -> bool:
