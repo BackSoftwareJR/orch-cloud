@@ -9,6 +9,7 @@ import { TaskChat } from "@/components/TaskChat";
 import { TaskComposer } from "@/components/TaskComposer";
 import { useJobLiveFeed } from "@/hooks/useJobLiveFeed";
 import {
+  autoFixJob,
   cancelJob,
   continueJob,
   fetchJobMessages,
@@ -151,6 +152,10 @@ export function TaskWorkspace({ job, onJobUpdated, onNewJob }: TaskWorkspaceProp
           <TaskActionsBar
             job={job}
             busy={actionBusy}
+            onAutoFix={async () => {
+              const next = await withBusy(() => autoFixJob(job.job_id));
+              onNewJob(next);
+            }}
             onRestart={async () => {
               const next = await withBusy(() => restartJob(job.job_id));
               onNewJob(next);

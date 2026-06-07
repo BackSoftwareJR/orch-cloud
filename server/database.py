@@ -45,3 +45,7 @@ def _migrate_schema() -> None:
             conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN parent_job_id VARCHAR(36)")
         if "thread_root_id" not in existing:
             conn.exec_driver_sql("ALTER TABLE jobs ADD COLUMN thread_root_id VARCHAR(36)")
+        if "preset" not in existing:
+            conn.exec_driver_sql(
+                "ALTER TABLE jobs ADD COLUMN preset VARCHAR(32) NOT NULL DEFAULT 'general'"
+            )

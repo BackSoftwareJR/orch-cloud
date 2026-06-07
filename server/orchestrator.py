@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from server.config import JOBS_DIR, PROJECT_ROOT
+from server.config import JOBS_DIR, PROJECT_ROOT, get_max_debug_retries
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,15 @@ def job_log_path(job_id: str) -> Path:
     return JOBS_DIR / f"{job_id}.log"
 
 
-def build_command(repo_url: str, task: str, level: str) -> list[str]:
+def build_command(
+    repo_url: str,
+    task: str,
+    level: str,
+    preset: str = "general",
+    *,
+    max_retries: int | None = None,
+) -> list[str]:
+    retries = max_retries if max_retries is not None else get_max_debug_retries()
     return resolve_orchestrator_cmd() + [
         "--repo",
         repo_url,
@@ -35,6 +43,10 @@ def build_command(repo_url: str, task: str, level: str) -> list[str]:
         task,
         "--level",
         level,
+        "--preset",
+        preset,
+        "--max-retries",
+        str(retries),
         "--json-log",
     ]
 

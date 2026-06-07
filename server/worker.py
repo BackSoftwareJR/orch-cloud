@@ -13,6 +13,7 @@ from server.database import SessionLocal
 from server.job_service import record_job_outcome
 from server.models import Job, JobStatus, Project
 from server.orchestrator import build_command, job_log_path, write_log_header
+from server.webhook_callback import notify_job_finished
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,11 @@ def _fetch_next_queued(db: Session, limit: int) -> list[Job]:
     )
 
 
-async def _run_subprocess(job_id: str, repo_url: str, task: str, level: str, log_path_str: str) -> None:
+async def _run_subprocess(
+    job_id: str, repo_url: str, task: str, level: str, preset: str, log_path_str: str
+) -> None:
     log_path = job_log_path(job_id)
-    cmd = build_command(repo_url, task, level)
+    cmd = build_command(repo_url, task, level, preset)
     started_at = _utcnow()
     write_log_header(log_path, cmd, started_at)
 
@@ -95,7 +98,14 @@ async def _run_subprocess(job_id: str, repo_url: str, task: str, level: str, log
                     success=False,
                     error_message=job.error_message,
                 )
+            project = db.query(Project).filter(Project.id == job.project_id).one_or_none()
             db.commit()
+            if project and job.status in {
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            }:
+                asyncio.create_task(notify_job_finished(job, project))
         finally:
             db.close()
             _running_job_ids.discard(job_id)
@@ -127,13 +137,14 @@ async def _dispatch_job(job: Job) -> None:
         repo_url = project.repo_url
         task = db_job.task
         level = db_job.level
+        preset = db_job.preset
         job_id = db_job.job_id
     finally:
         db.close()
 
-    logger.info("Starting job %s for project_id=%s", job_id, job.project_id)
+    logger.info("Starting job %s for project_id=%s preset=%s", job_id, job.project_id, preset)
     _running_job_ids.add(job_id)
-    asyncio.create_task(_run_subprocess(job_id, repo_url, task, level, log_path_str))
+    asyncio.create_task(_run_subprocess(job_id, repo_url, task, level, preset, log_path_str))
 
 
 async def worker_loop() -> None:

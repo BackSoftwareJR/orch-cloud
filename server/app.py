@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from server.config import DEFAULT_DEV_TOKEN, get_api_token, get_cors_origins
 from server.database import init_db
-from server.routers import health, jobs, projects, webhook, ws
+from server.routers import health, jobs, presets, projects, webhook, ws
 from server.worker import start_worker, stop_worker
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health.router)
+    app.include_router(presets.router)
     app.include_router(projects.router)
     app.include_router(jobs.router)
     app.include_router(webhook.router)

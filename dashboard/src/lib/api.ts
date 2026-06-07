@@ -129,3 +129,7 @@ export async function continueJob(jobId: string, payload: ContinueJobPayload): P
     body: JSON.stringify(payload),
   });
 }
+
+export async function autoFixJob(jobId: string): Promise<Job> {
+  return request<Job>(`/jobs/${jobId}/auto-fix`, { method: "POST" });
+}

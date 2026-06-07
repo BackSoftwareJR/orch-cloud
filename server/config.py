@@ -32,9 +32,31 @@ def get_max_concurrent_jobs() -> int:
     return max(1, min(value, 32))
 
 
+def get_require_api_token() -> bool:
+    return os.environ.get("REQUIRE_API_TOKEN", "false").lower() in ("1", "true", "yes")
+
+
+def get_webhook_secret() -> str | None:
+    value = os.environ.get("WEBHOOK_SECRET", "").strip()
+    return value or None
+
+
 def get_cors_origins() -> list[str]:
     raw = os.environ.get(
         "CORS_ORIGINS",
-        "http://localhost:3000,http://127.0.0.1:3000,http://2.24.15.210:3000",
+        "http://localhost:3000,http://127.0.0.1:3000,https://backclub.it,https://www.backclub.it",
     )
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def get_max_debug_retries() -> int:
+    raw = os.environ.get("MAX_DEBUG_RETRIES", "6")
+    try:
+        value = int(raw)
+    except ValueError:
+        return 6
+    return max(1, min(value, 10))
+
+
+def get_push_on_test_failure() -> bool:
+    return os.environ.get("PUSH_ON_TEST_FAILURE", "false").lower() in ("1", "true", "yes")

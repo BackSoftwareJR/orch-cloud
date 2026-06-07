@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from openai import OpenAI
 
 from core.analyzers.detector import detect_framework, select_analyzer
 from core.context_builder import prioritize_context
+from core.presets.registry import PresetDefinition, get_preset
 from core.docker_controller import DockerController
 from core.exceptions import GitConflictError, GitError, HealthCheckError, HyperOrchestratorError, ProjectNotInitializedError
 from core.github_manager import GitHubManager
@@ -28,6 +30,7 @@ from core.models import (
 )
 from core.run_report import build_run_report, write_run_report
 from core.task_planner import rollback_completed_steps, validate_and_order_plan
+from core.test_runner import TestCheckResult, format_test_failure_for_agent, run_preset_check
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +61,7 @@ class HyperOrchestrator:
         self._openai_client: OpenAI | None = None
         self._health_warnings: list[str] = []
         self._completed_pro_steps: list[int] = []
+        self.preset_def: PresetDefinition = get_preset(request.preset)
 
     @property
     def openai_client(self) -> OpenAI:
@@ -87,6 +91,13 @@ class HyperOrchestrator:
                 health.raise_if_failed()
             for warning in health.warnings:
                 logger.warning(warning)
+
+            logger.info(
+                "Preset=%s model=%s yolo=%s",
+                self.preset_def.id.value,
+                self.preset_def.model,
+                self.preset_def.yolo,
+            )
 
             self._prepare_repository()
             self._analyze_project()
@@ -162,6 +173,7 @@ class HyperOrchestrator:
             extra={
                 "framework_confidence": self.framework_confidence,
                 "test_command": self.test_command,
+                "tests_skipped": result.tests_skipped,
             },
         )
         try:
@@ -243,6 +255,7 @@ class HyperOrchestrator:
             f"**Framework:** {self.framework} (confidence: {self.framework_confidence:.0%})\n\n"
             f"**Task:** {self.request.task}\n\n"
             f"**Level:** {self.request.level.name}\n\n"
+            f"**Preset:** {self.preset_def.id.value}\n\n"
         )
         content = header + self.analysis.summary
         path = self.project_root / SYSTEM_CONTEXT_FILENAME
@@ -267,26 +280,37 @@ class HyperOrchestrator:
         self,
         task: str,
         *,
-        strict: bool = False,
+        strict: bool | None = None,
         context_suffix: str = "",
         prior_errors: str = "",
     ) -> str:
         assert self.project_root is not None and self.analysis is not None
+        preset = self.preset_def
+        if strict is None:
+            strict = preset.strict_by_default
+
         context_excerpt = prioritize_context(
-            self.analysis.summary, max_chars=6000, task=self.request.task
+            self.analysis.summary,
+            max_chars=6000,
+            task=self.request.task,
+            section_priorities=preset.context_priorities or None,
         )
         lines = [
+            preset.system_prompt,
+            "",
             f"You are working in a {self.framework} project at /workspace.",
             f"Project context (prioritized excerpt):\n{context_excerpt}",
             "",
             f"Task: {task}",
+            "",
+            preset.constraints_block,
         ]
         if strict:
             lines.extend(
                 [
                     "",
-                    "MODE: FAST — Apply the minimal fix only.",
-                    "- Do not run tests.",
+                    "MODE: STRICT — Apply the minimal change required.",
+                    "- Do not run tests unless the orchestrator runs them separately.",
                     "- Do not refactor unrelated code.",
                     "- Commit-ready changes only.",
                 ]
@@ -297,18 +321,35 @@ class HyperOrchestrator:
             )
         if context_suffix:
             lines.extend(["", context_suffix])
+        lines.extend(["", preset.quality_block])
         return "\n".join(lines)
+
+    def _run_preset_agent(
+        self,
+        task: str,
+        *,
+        strict: bool | None = None,
+        context_suffix: str = "",
+        prior_errors: str = "",
+    ):
+        assert self.project_root is not None
+        preset = self.preset_def
+        prompt = self._build_agent_prompt(
+            task,
+            strict=strict,
+            context_suffix=context_suffix,
+            prior_errors=prior_errors,
+        )
+        return self.docker.run_agent(
+            self.project_root,
+            prompt,
+            model=preset.model,
+            yolo=preset.yolo,
+        )
 
     def _run_fast(self) -> OrchestrationResult:
         assert self.project_root is not None and self._git is not None
-        prompt = self._build_agent_prompt(self.request.task, strict=True)
-
-        result = self.docker.run_agent(
-            self.project_root,
-            prompt,
-            model="composer-2.5",
-            yolo=False,
-        )
+        result = self._run_preset_agent(self.request.task, strict=True)
 
         if not result.success:
             logger.error(
@@ -336,11 +377,52 @@ class HyperOrchestrator:
             tasks_completed=1,
         )
 
+    def _should_push_on_test_failure(self) -> bool:
+        env = os.environ.get("PUSH_ON_TEST_FAILURE", "").strip().lower()
+        if env in ("1", "true", "yes"):
+            return True
+        if env in ("0", "false", "no"):
+            return False
+        return self.preset_def.push_on_test_failure
+
+    def _log_test_check(self, attempt: int, check: TestCheckResult) -> None:
+        summary = {
+            "event": "test_check",
+            "attempt": attempt,
+            "strategy": check.strategy,
+            "command": check.command,
+            "success": check.success,
+            "skipped": check.skipped,
+            "warnings_only": check.warnings_only,
+            "output_tail": redact_secrets(check.logs.strip()[-8000:]),
+        }
+        if self.request.json_logs:
+            logger.info(json.dumps(summary, ensure_ascii=False))
+        else:
+            logger.info(
+                "Test check attempt=%d strategy=%s command=%s success=%s",
+                attempt,
+                check.strategy,
+                check.command,
+                check.success,
+            )
+
+    def _commit_and_push(self, message: str) -> bool:
+        assert self._git is not None
+        committed = self._git.stage_all_and_commit(message)
+        if committed:
+            self._git.push_staging()
+            return True
+        return False
+
     def _run_medium(self) -> OrchestrationResult:
         assert self.project_root is not None and self._git is not None
         project_key = MemoryManager.project_key_from_path(self.project_root)
         prior_errors = ""
         failure_count = 0
+        agent_succeeded = False
+        last_check: TestCheckResult | None = None
+        fallback_command = self.test_command or "npm run test"
 
         for attempt in range(1, self.request.max_debug_retries + 1):
             logger.info(
@@ -348,15 +430,9 @@ class HyperOrchestrator:
                 attempt,
                 self.request.max_debug_retries,
             )
-            prompt = self._build_agent_prompt(
+            agent_result = self._run_preset_agent(
                 self.request.task,
                 prior_errors=prior_errors,
-            )
-            agent_result = self.docker.run_agent(
-                self.project_root,
-                prompt,
-                model="composer-2.5",
-                yolo=True,
             )
 
             if not agent_result.success:
@@ -376,11 +452,17 @@ class HyperOrchestrator:
                 )
                 continue
 
-            test_result = self.docker.run_command(
+            agent_succeeded = True
+            check = run_preset_check(
+                self.docker,
                 self.project_root,
-                self.test_command or "npm run test",
+                self.preset_def,
+                fallback_command,
             )
-            if test_result.success:
+            last_check = check
+            self._log_test_check(attempt, check)
+
+            if check.skipped or check.success or check.warnings_only:
                 if failure_count > 0:
                     self.memory.record_success_after_failures(
                         project_key,
@@ -391,24 +473,25 @@ class HyperOrchestrator:
                     )
                 self.memory.record_attempt(project_key, self.request.task, None, success=True)
 
-                committed = self._git.stage_all_and_commit(
+                pushed = self._commit_and_push(
                     f"hyper-orchestrator: {self.request.task[:72]}"
                 )
-                pushed = False
-                if committed:
-                    self._git.push_staging()
-                    pushed = True
+                msg = "Medium task completed with passing checks"
+                if check.warnings_only:
+                    msg = "Medium task completed (lint warnings only — pushed)"
+                elif check.skipped:
+                    msg = "Medium task completed (checks skipped for preset)"
 
                 return OrchestrationResult(
                     success=True,
                     level=TaskLevel.MEDIUM,
-                    message="Medium task completed with passing tests",
+                    message=msg,
                     pushed_to_staging=pushed,
                     tasks_completed=1,
-                    tests_passed=True,
+                    tests_passed=True if not check.skipped else None,
                 )
 
-            prior_errors = DockerController.extract_error_signature(test_result.logs)
+            prior_errors = format_test_failure_for_agent(check)
             failure_count += 1
             self.memory.record_attempt(
                 project_key,
@@ -416,16 +499,39 @@ class HyperOrchestrator:
                 prior_errors,
                 success=False,
             )
-            fix_prompt = self._build_agent_prompt(
-                self.request.task,
-                prior_errors=f"Tests failed:\n{prior_errors}",
-                context_suffix="Fix the failing tests before finishing.",
+            logger.warning(
+                "Checks failed on attempt %d/%d — launching fix agent",
+                attempt,
+                self.request.max_debug_retries,
             )
-            self.docker.run_agent(
-                self.project_root,
-                fix_prompt,
-                model="composer-2.5",
-                yolo=True,
+            self._run_preset_agent(
+                self.request.task,
+                prior_errors=f"Validation failed:\n\n{prior_errors}",
+                context_suffix="Fix the failing checks before finishing.",
+            )
+
+        if (
+            agent_succeeded
+            and self._should_push_on_test_failure()
+            and self._git.has_uncommitted_changes()
+        ):
+            pushed = self._commit_and_push(
+                f"hyper-orchestrator (tests skipped): {self.request.task[:60]}"
+            )
+            detail = ""
+            if last_check:
+                detail = f" Last command: {last_check.command}."
+            return OrchestrationResult(
+                success=True,
+                level=TaskLevel.MEDIUM,
+                message=(
+                    f"Pushed to staging with tests_skipped after "
+                    f"{self.request.max_debug_retries} attempts.{detail}"
+                ),
+                pushed_to_staging=pushed,
+                tasks_completed=1,
+                tests_passed=False,
+                tests_skipped=True,
             )
 
         return OrchestrationResult(
@@ -444,18 +550,12 @@ class HyperOrchestrator:
 
         for atomic in plan.tasks:
             logger.info("PRO step %d: %s", atomic.id, atomic.title)
-            prompt = self._build_agent_prompt(
+            result = self._run_preset_agent(
                 f"{atomic.title}\n\n{atomic.description}",
                 context_suffix=(
                     f"This is step {atomic.id} of {len(plan.tasks)} in a larger plan.\n"
                     f"Plan summary: {plan.summary}"
                 ),
-            )
-            result = self.docker.run_agent(
-                self.project_root,
-                prompt,
-                model="composer-2.5",
-                yolo=True,
             )
             if not result.success:
                 error_sig = DockerController.extract_error_signature(result.logs)
@@ -523,15 +623,9 @@ class HyperOrchestrator:
             return True
 
         error_sig = DockerController.extract_error_signature(validation.logs)
-        fix_prompt = self._build_agent_prompt(
+        fix_result = self._run_preset_agent(
             atomic.description,
             prior_errors=f"Validation failed:\n{error_sig}",
-        )
-        fix_result = self.docker.run_agent(
-            self.project_root,
-            fix_prompt,
-            model="composer-2.5",
-            yolo=True,
         )
         if not fix_result.success:
             return False
@@ -544,15 +638,24 @@ class HyperOrchestrator:
     def _decompose_task(self) -> TaskPlan:
         assert self.project_root is not None and self.analysis is not None
         context = prioritize_context(
-            self.analysis.summary, max_chars=6000, task=self.request.task
+            self.analysis.summary,
+            max_chars=6000,
+            task=self.request.task,
+            section_priorities=self.preset_def.context_priorities or None,
         )
-        system_prompt = (
+        base_prompt = (
             "You are a senior software architect. Break the user's task into atomic, "
             "sequential steps for an AI coding agent. Return ONLY valid JSON matching:\n"
             '{"summary": "...", "tasks": [{"id": 1, "title": "...", "description": "...", '
             '"validation_command": "optional shell command or null", "depends_on": [optional int ids]}]}\n'
             f"Framework: {self.framework}. Test command: {self.test_command}."
         )
+        system_prompt = self.preset_def.pro_decompose_prompt or base_prompt
+        if self.preset_def.pro_decompose_prompt:
+            system_prompt = (
+                f"{self.preset_def.pro_decompose_prompt}\n\n"
+                f"{base_prompt}"
+            )
         user_content = f"Project context:\n{context}\n\nTask to decompose:\n{self.request.task}"
 
         response = self.openai_client.chat.completions.create(

@@ -35,6 +35,7 @@ def build_run_report(
             "repo_url": request.repo_url,
             "task": request.task,
             "level": request.level.name,
+            "preset": request.preset.value,
             "max_debug_retries": request.max_debug_retries,
         },
         "result": {
@@ -44,6 +45,7 @@ def build_run_report(
             "tasks_completed": result.tasks_completed,
             "pushed_to_staging": result.pushed_to_staging,
             "tests_passed": result.tests_passed,
+            "tests_skipped": result.tests_skipped,
         },
         "framework": framework,
         "health_warnings": health_warnings or [],

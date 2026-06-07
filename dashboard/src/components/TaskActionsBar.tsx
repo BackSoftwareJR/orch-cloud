@@ -5,6 +5,7 @@ import {
   ListRestart,
   MessageSquarePlus,
   RotateCcw,
+  Wrench,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
@@ -16,6 +17,7 @@ interface TaskActionsBarProps {
   onRestart: () => Promise<void>;
   onRequeue: () => Promise<void>;
   onCancel: () => Promise<void>;
+  onAutoFix?: () => Promise<void>;
 }
 
 function ActionButton({
@@ -52,11 +54,15 @@ export function TaskActionsBar({
   onRestart,
   onRequeue,
   onCancel,
+  onAutoFix,
 }: TaskActionsBarProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const isActive = job.status === "QUEUED" || job.status === "RUNNING";
   const isTerminal =
     job.status === "COMPLETED" || job.status === "FAILED" || job.status === "CANCELLED";
+
+  const showAutoFix =
+    job.status === "FAILED" && Boolean(job.can_auto_fix) && typeof onAutoFix === "function";
 
   async function run(action: () => Promise<void>) {
     setActionError(null);
@@ -71,6 +77,14 @@ export function TaskActionsBar({
     <div className="flex flex-wrap items-center gap-2">
       {isTerminal && (
         <>
+          {showAutoFix && (
+            <ActionButton
+              label="Esegui fix"
+              icon={<Wrench className="h-3.5 w-3.5" />}
+              disabled={busy}
+              onClick={() => void run(onAutoFix!)}
+            />
+          )}
           <ActionButton
             label="Restart"
             icon={<RotateCcw className="h-3.5 w-3.5" />}

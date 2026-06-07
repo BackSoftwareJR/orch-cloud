@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from enum import IntEnum
+from enum import Enum, IntEnum
 from pathlib import Path
 from typing import Literal
 
@@ -43,14 +43,36 @@ class TaskLevel(IntEnum):
         return mapping[key]
 
 
+class AgentPreset(str, Enum):
+    """Specialized agent role for orchestrated tasks."""
+
+    GENERAL = "general"
+    UX = "ux"
+    BACKEND = "backend"
+    BUGFIX = "bugfix"
+
+    @classmethod
+    def from_value(cls, value: str | None) -> AgentPreset:
+        if value is None or not str(value).strip():
+            return cls.GENERAL
+        key = str(value).lower().strip()
+        for member in cls:
+            if member.value == key:
+                return member
+        raise ValueError(
+            f"Invalid preset '{value}'. Use: {', '.join(m.value for m in cls)}."
+        )
+
+
 class TaskRequest(BaseModel):
     """Validated input for an orchestration run."""
 
     repo_url: str = Field(..., min_length=1, description="Git repository URL")
     task: str = Field(..., min_length=1, description="Natural-language task description")
     level: TaskLevel = TaskLevel.MEDIUM
+    preset: AgentPreset = AgentPreset.GENERAL
     work_dir: str | None = Field(default=None, description="Local clone directory")
-    max_debug_retries: int = Field(default=3, ge=1, le=10)
+    max_debug_retries: int = Field(default=6, ge=1, le=10)
     openai_model: str = Field(default="gpt-4o-mini")
     dry_run: bool = Field(default=False, description="Validate and plan without executing agents")
     json_logs: bool = Field(default=False, description="Emit structured JSON logs")
@@ -119,5 +141,6 @@ class OrchestrationResult(BaseModel):
     pushed_to_staging: bool = False
     tasks_completed: int = 0
     tests_passed: bool | None = None
+    tests_skipped: bool = False
     report_path: Path | None = None
     correlation_id: str | None = None

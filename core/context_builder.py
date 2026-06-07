@@ -27,7 +27,13 @@ _SECTION_PRIORITY = {
 }
 
 
-def prioritize_context(summary: str, *, max_chars: int = 6000, task: str = "") -> str:
+def prioritize_context(
+    summary: str,
+    *,
+    max_chars: int = 6000,
+    task: str = "",
+    section_priorities: dict[str, int] | None = None,
+) -> str:
     """Return the most relevant portions of .system_context.md for a prompt."""
     if len(summary) <= max_chars:
         return summary
@@ -42,7 +48,7 @@ def prioritize_context(summary: str, *, max_chars: int = 6000, task: str = "") -
         start = match.end()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(summary)
         body = summary[start:end].strip()
-        priority = _section_priority(title, task)
+        priority = _section_priority(title, task, section_priorities)
         sections.append((title, body, priority))
 
     sections.sort(key=lambda s: s[2])
@@ -62,9 +68,17 @@ def prioritize_context(summary: str, *, max_chars: int = 6000, task: str = "") -
     return "\n".join(parts)
 
 
-def _section_priority(title: str, task: str) -> int:
+def _section_priority(
+    title: str,
+    task: str,
+    section_priorities: dict[str, int] | None = None,
+) -> int:
     """Lower number = higher priority."""
     key = title.lower()
+    if section_priorities:
+        for pattern, priority in section_priorities.items():
+            if pattern in key:
+                return priority
     base = _SECTION_PRIORITY.get(key, 50)
 
     task_lower = task.lower()

@@ -8,8 +8,9 @@ import sys
 from pathlib import Path
 
 from core.logging_config import configure_logging, new_correlation_id
-from core.models import TaskLevel, TaskRequest
+from core.models import AgentPreset, TaskRequest
 from core.orchestrator import HyperOrchestrator
+from core.presets.registry import resolve_level
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Natural-language description of the task",
     )
     parser.add_argument(
+        "--preset",
+        default="general",
+        help="Agent preset: general, ux, backend, bugfix (default: general)",
+    )
+    parser.add_argument(
         "--level",
         default="medium",
         help="Execution level: 1/fast, 2/medium, 3/pro (aliases: level1, l1, etc.)",
@@ -42,8 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-retries",
         type=int,
-        default=3,
-        help="Max debug retries for medium level (default: 3)",
+        default=6,
+        help="Max debug retries for medium level (default: 6)",
     )
     parser.add_argument(
         "--openai-model",
@@ -81,7 +87,12 @@ def parse_args(argv: list[str] | None = None) -> TaskRequest:
     configure_logging(verbose=args.verbose, json_logs=args.json_log)
 
     try:
-        level = TaskLevel.from_value(args.level)
+        preset = AgentPreset.from_value(args.preset)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    try:
+        level = resolve_level(preset, args.level)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -89,6 +100,7 @@ def parse_args(argv: list[str] | None = None) -> TaskRequest:
         repo_url=args.repo,
         task=args.task,
         level=level,
+        preset=preset,
         work_dir=args.work_dir,
         max_debug_retries=args.max_retries,
         openai_model=args.openai_model,
@@ -105,8 +117,9 @@ def main(argv: list[str] | None = None) -> int:
         return int(exc.code) if exc.code is not None else 1
 
     logger.info(
-        "Starting HyperOrchestrator — level=%s repo=%s dry_run=%s",
+        "Starting HyperOrchestrator — level=%s preset=%s repo=%s dry_run=%s",
         request.level.name,
+        request.preset.value,
         request.repo_url,
         request.dry_run,
     )

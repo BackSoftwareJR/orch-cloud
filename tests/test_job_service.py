@@ -7,7 +7,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from server.database import Base
-from server.job_service import cancel_job, continue_job, get_job_messages, requeue_job, restart_job
+from server.job_service import (
+    auto_fix_job,
+    can_auto_fix_job,
+    cancel_job,
+    continue_job,
+    get_job_messages,
+    requeue_job,
+    restart_job,
+)
 from server.models import Job, JobStatus, Project
 
 
@@ -75,3 +83,30 @@ def test_continue_job_creates_follow_up_with_messages() -> None:
     assert continued.parent_job_id == source.job_id
     messages = get_job_messages(db, continued.job_id)
     assert any(message.content == "Also add tests for auth middleware" for message in messages)
+
+
+def test_can_auto_fix_for_failed_job_with_test_errors() -> None:
+    db = _session()
+    job = _seed_project_and_job(db, status=JobStatus.FAILED)
+    job.error_message = "Medium task failed after 6 attempts"
+    db.commit()
+
+    from server.orchestrator import job_log_path
+
+    log_path = job_log_path(job.job_id)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("Validation failed:\nCommand: npm run test\nFAIL tests/auth.test.ts\n")
+    assert can_auto_fix_job(job) is True
+
+
+def test_auto_fix_job_creates_continuation() -> None:
+    db = _session()
+    source = _seed_project_and_job(db, status=JobStatus.FAILED)
+    source.error_message = "Process exited with code 1"
+    db.commit()
+
+    fixed = auto_fix_job(db, source.job_id)
+    assert fixed.job_id != source.job_id
+    assert fixed.status == JobStatus.QUEUED
+    assert fixed.parent_job_id == source.job_id
+    assert "Auto-fix" in fixed.task or "auto-fix" in fixed.task.lower()

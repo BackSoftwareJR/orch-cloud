@@ -31,6 +31,7 @@ export interface Job {
   parent_job_id?: string | null;
   thread_root_id?: string | null;
   log_tail?: string | null;
+  can_auto_fix?: boolean;
 }
 
 export interface JobMessage {

@@ -1,4 +1,4 @@
-"""Job lifecycle actions: restart, requeue, cancel, continue, and chat messages."""
+"""Job lifecycle actions: restart, requeue, cancel, continue, auto-fix, and chat messages."""
 
 from __future__ import annotations
 
@@ -14,6 +14,19 @@ from server.orchestrator import job_log_path, read_log_tail
 
 TERMINAL_STATUSES = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
 ACTIVE_STATUSES = {JobStatus.QUEUED, JobStatus.RUNNING}
+
+_TEST_FAILURE_MARKERS = (
+    "tests failed",
+    "test failed",
+    "validation failed",
+    "checks failed",
+    "medium task failed",
+    "exit: non-zero",
+    "failed after",
+    "pytest",
+    "npm err",
+    "error:",
+)
 
 
 def _utcnow() -> datetime:
@@ -101,6 +114,92 @@ def build_continuation_task(db: Session, job: Job, follow_up: str) -> str:
     return sanitize_task_prompt("\n".join(lines), max_length=12000)
 
 
+def extract_test_errors_from_log(log_text: str | None, *, max_lines: int = 120) -> str:
+    if not log_text:
+        return "No log output available — inspect the repository and fix failing checks."
+
+    lines = log_text.splitlines()
+    error_lines = [
+        line
+        for line in lines
+        if any(marker in line.lower() for marker in _TEST_FAILURE_MARKERS)
+    ]
+    selected = error_lines[-max_lines:] if error_lines else lines[-max_lines:]
+    excerpt = "\n".join(selected).strip()
+    return excerpt[:8000] if excerpt else "\n".join(lines[-max_lines:]).strip()[:8000]
+
+
+def can_auto_fix_job(job: Job) -> bool:
+    if job.status != JobStatus.FAILED:
+        return False
+    log_path = job_log_path(job.job_id)
+    tail = read_log_tail(log_path, max_lines=200) or ""
+    combined = f"{job.error_message or ''}\n{tail}".lower()
+    if "process exited with code" in combined or "medium task failed" in combined:
+        return True
+    return any(marker in combined for marker in _TEST_FAILURE_MARKERS)
+
+
+def build_auto_fix_task(db: Session, job: Job) -> str:
+    log_path = job_log_path(job.job_id)
+    tail = read_log_tail(log_path, max_lines=200)
+    errors = extract_test_errors_from_log(tail)
+    follow_up = (
+        "Auto-fix: the previous run failed validation after max retries.\n\n"
+        f"Failure summary:\n{job.error_message or 'Run failed'}\n\n"
+        f"Test/check output:\n{errors}\n\n"
+        "Fix the root cause, keep changes minimal, and ensure checks pass."
+    )
+    return build_continuation_task(db, job, follow_up)
+
+
+def auto_fix_job(db: Session, job_id: str) -> Job:
+    source = _get_job_or_404(db, job_id)
+    if source.status != JobStatus.FAILED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Auto-fix only available for failed jobs (status={source.status.value})",
+        )
+    if not can_auto_fix_job(source):
+        raise HTTPException(
+            status_code=409,
+            detail="No test/check failures detected in logs — use Continue or Restart instead",
+        )
+
+    add_system_message(db, source.job_id, "Auto-fix queued from dashboard.")
+
+    new_uuid = str(uuid.uuid4())
+    composed_task = build_auto_fix_task(db, source)
+    job = Job(
+        job_id=new_uuid,
+        project_id=source.project_id,
+        task=composed_task,
+        level=source.level,
+        preset=source.preset,
+        status=JobStatus.QUEUED,
+        logs_path=str(job_log_path(new_uuid)),
+        parent_job_id=source.job_id,
+        thread_root_id=_thread_root_id(source),
+    )
+    db.add(job)
+    db.flush()
+    db.add(
+        JobMessage(
+            job_id=new_uuid,
+            role=MessageRole.USER,
+            content="Esegui fix — auto-generated from last test failures.",
+        )
+    )
+    add_system_message(
+        db,
+        new_uuid,
+        f"Auto-fix continuing from run {source.job_id[:8]}…",
+    )
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def restart_job(db: Session, job_id: str) -> Job:
     source = _get_job_or_404(db, job_id)
     new_uuid = str(uuid.uuid4())
@@ -109,6 +208,7 @@ def restart_job(db: Session, job_id: str) -> Job:
         project_id=source.project_id,
         task=source.task,
         level=source.level,
+        preset=source.preset,
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(new_uuid)),
         parent_job_id=source.job_id,
@@ -182,6 +282,7 @@ def continue_job(db: Session, job_id: str, message: str) -> Job:
         project_id=source.project_id,
         task=composed_task,
         level=source.level,
+        preset=source.preset,
         status=JobStatus.QUEUED,
         logs_path=str(job_log_path(new_uuid)),
         parent_job_id=source.job_id,

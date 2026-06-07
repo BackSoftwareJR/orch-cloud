@@ -1,0 +1,24 @@
+general:
+  - task: "Add health check endpoint documentation"
+    expect_files: ["README.md", "docs/**"]
+  - task: "Improve error messages on config load"
+    max_files_changed: 5
+
+ux:
+  - task: "Redesign news page as modern editorial board with card grid"
+    expect_files: ["*.html", "*.css"]
+    expect_not: ["*.php", "database/**"]
+  - task: "Improve mobile navigation and touch targets"
+    expect_files: ["*.html", "*.css", "components/**"]
+
+backend:
+  - task: "Add pagination to list API endpoint"
+    expect_files: ["routes/**", "app/**", "api/**"]
+  - task: "Add database index on frequently queried foreign key"
+    expect_files: ["database/**", "migrations/**"]
+
+bugfix:
+  - task: "Fix 500 error on form submission"
+    max_files_changed: 3
+  - task: "Resolve N+1 query on index page"
+    max_files_changed: 4
