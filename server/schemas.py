@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from core.exceptions import SecurityError
 from core.models import AgentPreset, TaskLevel
@@ -280,13 +280,44 @@ class ExecuteAgentRequest(BaseModel):
     """n8n / backclub CRM payload for Hyper-bs workflow."""
 
     dedicated_prompt: str = Field(..., min_length=1)
+    exact_prompt: bool = Field(
+        default=False,
+        description="When true, preserve dedicated_prompt verbatim (no trim/sanitize).",
+    )
     github_url: str = Field(..., min_length=1)
     specialist_role: str | None = Field(default=None)
-    task_id: str | None = Field(default=None, description="External CRM task id")
+    task_id: str | None = Field(
+        default=None,
+        description="CRM task id (numeric) or workspace_agent_{id}",
+    )
     project_id: str | None = Field(default=None, description="External CRM project id")
     website_url: str | None = None
     crm_log_url: str | None = None
     crm_auth_token: str | None = None
+    callback_url: str | None = Field(
+        default=None,
+        description="CRM task-events webhook (append step/event)",
+    )
+    callback_status_url: str | None = Field(
+        default=None,
+        description="CRM status webhook (n8n_status / progress updates)",
+    )
+    callback_completed_url: str | None = Field(
+        default=None,
+        description="CRM completed webhook",
+    )
+    callback_task_log_url: str | None = Field(
+        default=None,
+        description="CRM task-log webhook (streaming log lines)",
+    )
+    callback_close_task_url: str | None = Field(
+        default=None,
+        description="CRM close-task webhook",
+    )
+    callback_auth_header: str | None = Field(
+        default=None,
+        description="Auth header name for CRM callbacks (e.g. authbs)",
+    )
 
     @field_validator(
         "specialist_role",
@@ -295,6 +326,12 @@ class ExecuteAgentRequest(BaseModel):
         "website_url",
         "crm_log_url",
         "crm_auth_token",
+        "callback_url",
+        "callback_status_url",
+        "callback_completed_url",
+        "callback_task_log_url",
+        "callback_close_task_url",
+        "callback_auth_header",
         mode="before",
     )
     @classmethod
@@ -304,6 +341,10 @@ class ExecuteAgentRequest(BaseModel):
     @field_validator("dedicated_prompt", mode="before")
     @classmethod
     def coerce_prompt(cls, value: object) -> str:
+        if isinstance(value, str):
+            if not value:
+                raise ValueError("dedicated_prompt is required")
+            return value
         coerced = _coerce_optional_str(value)
         if not coerced:
             raise ValueError("dedicated_prompt is required")
@@ -317,13 +358,30 @@ class ExecuteAgentRequest(BaseModel):
             raise ValueError("github_url is required")
         return coerced
 
-    @field_validator("dedicated_prompt")
-    @classmethod
-    def validate_prompt(cls, value: str) -> str:
+    @model_validator(mode="after")
+    def validate_prompt_exact(self) -> "ExecuteAgentRequest":
         try:
-            return sanitize_task_prompt(value)
+            if self.exact_prompt:
+                if not self.dedicated_prompt:
+                    raise SecurityError(
+                        "Task description is empty.",
+                        remediation="Provide dedicated_prompt.",
+                    )
+                if "\x00" in self.dedicated_prompt:
+                    object.__setattr__(
+                        self,
+                        "dedicated_prompt",
+                        self.dedicated_prompt.replace("\x00", ""),
+                    )
+            else:
+                object.__setattr__(
+                    self,
+                    "dedicated_prompt",
+                    sanitize_task_prompt(self.dedicated_prompt),
+                )
         except SecurityError as exc:
             raise ValueError(str(exc)) from exc
+        return self
 
     @field_validator("github_url")
     @classmethod

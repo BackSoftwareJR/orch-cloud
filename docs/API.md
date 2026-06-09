@@ -62,31 +62,47 @@ Headers:
 | `Content-Type` | `application/json` |
 | `X-API-Key` | Your `ORCHESTRATOR_API_TOKEN` from the VPS `.env` |
 
-Body (JSON):
+Body (JSON) — full CRM + n8n payload:
 
 ```json
 {
   "dedicated_prompt": "Implement the hero section from Figma",
+  "exact_prompt": false,
   "github_url": "https://github.com/BackSoftwareJR/villa_sole",
   "website_url": "https://villa-sole.example.com",
   "specialist_role": "frontend dev",
   "task_id": "232",
-  "project_id": "crm-project-99",
-  "crm_log_url": "https://crm.example.com/tasks/232/log",
-  "crm_auth_token": "optional-crm-bearer-token"
+  "project_id": "99",
+  "crm_log_url": "https://backclub.it/api/workspace/agents/12/n8n-callback",
+  "crm_auth_token": "your-callback-secret",
+  "callback_url": "https://backclub.it/api/webhooks/n8n/task-events",
+  "callback_status_url": "https://backclub.it/api/webhooks/n8n/status",
+  "callback_completed_url": "https://backclub.it/api/webhooks/n8n/completed",
+  "callback_task_log_url": "https://backclub.it/api/webhooks/n8n/task-log",
+  "callback_close_task_url": "https://backclub.it/api/webhooks/n8n/close-task",
+  "callback_auth_header": "authbs"
 }
 ```
+
+Workspace agents use `task_id: "workspace_agent_{id}"` (e.g. `"workspace_agent_12"`).
 
 | Field | Required | Maps to |
 |-------|----------|---------|
 | `dedicated_prompt` | yes | Agent task text |
+| `exact_prompt` | no | When `true`, prompt is used verbatim (no sanitize/trim) |
 | `github_url` | yes | Find or create orchestrator project by repo URL |
 | `specialist_role` | no | Agent preset (see table below) |
-| `task_id` | no | Stored as `metadata.crm_task_id` on the job |
-| `project_id` | no | External CRM project id → `metadata.crm_project_id` (not orchestrator project id) |
+| `task_id` | no | CRM task id or `workspace_agent_{id}` → `metadata.crm_task_id` |
+| `project_id` | no | External CRM project id → `metadata.crm_project_id` |
 | `website_url` | no | Project settings + job metadata |
-| `crm_log_url` | no | Job metadata for callbacks |
-| `crm_auth_token` | no | Job metadata (for CRM API calls from agent) |
+| `crm_log_url` | no | Legacy log URL (stored in metadata) |
+| `crm_auth_token` | no | Auth value for CRM callback headers |
+| `callback_url` | no | CRM task-events webhook |
+| `callback_status_url` | no | CRM status webhook (live n8n_status updates) |
+| `callback_completed_url` | no | CRM completed webhook |
+| `callback_task_log_url` | no | CRM task-log webhook (streaming agent output) |
+| `callback_close_task_url` | no | CRM close-task webhook (fired on success) |
+| `callback_auth_header` | no | Header name for CRM auth (e.g. `authbs`) |
 
 **Specialist role → preset**
 
@@ -169,6 +185,119 @@ Store per-project defaults and webhook URL in `Project.settings`:
 }
 ```
 
+## Live updates architecture (CRM + n8n)
+
+End-to-end flow from CRM/n8n to live workspace updates:
+
+```
+CRM Task / Workspace Agent
+        │
+        ▼
+   n8n Webhook (optional Groq exact_prompt branch)
+        │
+        ▼
+POST /api/v1/execute-agent  ──►  Job QUEUED
+        │                              │
+        │                              ├─► callback_status_url  {status: queued}
+        ▼                              │
+   Worker picks job                    │
+        │                              │
+        ▼                              │
+   Job RUNNING  ───────────────────────┼─► callback_status_url  {status: running}
+        │                              │
+        ▼                              ├─► callback_task_log_url (each log line)
+   Agent subprocess                    │     or callback_url (task-events fallback)
+        │                              │
+        ▼                              │
+   Job COMPLETED/FAILED ───────────────┼─► callback_status_url  {status: completed|failed}
+        │                              │
+        └──────────────────────────────┴─► callback_completed_url
+                                         callback_close_task_url (success only)
+```
+
+### When each callback fires
+
+| Milestone | URL | Payload highlights |
+|-----------|-----|-------------------|
+| Job accepted (queued) | `callback_status_url` | `task_id`, `project_id`, `status: queued`, `run_id`, `progress: 0` |
+| Worker starts agent | `callback_status_url` | `status: running`, `message: Agent started`, `progress: 10` |
+| Each stdout log line | `callback_task_log_url` | `step_key`, `title`, `message`, `log_message` |
+| Job finished | `callback_status_url` | `status: completed` or `failed`, `progress: 100` on success |
+| Job finished | `callback_completed_url` | `result` object on success, `error` on failure |
+| Success only | `callback_close_task_url` | Same as completed (CRM marks task closed) |
+
+All CRM callbacks include `task_id` (numeric or `workspace_agent_{id}`), `project_id`, and `run_id`.
+
+### Auth on outbound callbacks
+
+The orchestrator signs every callback with optional `X-Orchestrator-Signature` (HMAC-SHA256 of body, `WEBHOOK_SECRET`).
+
+When `callback_auth_header` + `crm_auth_token` are in the request, they are sent on every CRM callback:
+
+```
+authbs: <crm_auth_token>
+```
+
+### n8n HTTP Request node (execute-agent body)
+
+Use this in the n8n node that calls the orchestrator after the webhook switch:
+
+```json
+{
+  "dedicated_prompt": "={{ $json.dedicated_prompt }}",
+  "exact_prompt": "={{ $json.exact_prompt }}",
+  "github_url": "={{ $json.github_url }}",
+  "website_url": "={{ $json.website_url }}",
+  "specialist_role": "={{ $json.specialist_role }}",
+  "task_id": "={{ $json.task_id }}",
+  "project_id": "={{ $json.project_id }}",
+  "crm_auth_token": "={{ $json.crm_auth_token }}",
+  "callback_url": "={{ $json.callback_url }}",
+  "callback_status_url": "={{ $json.callback_status_url }}",
+  "callback_completed_url": "={{ $json.callback_completed_url }}",
+  "callback_task_log_url": "={{ $json.callback_task_log_url }}",
+  "callback_close_task_url": "={{ $json.callback_close_task_url }}",
+  "callback_auth_header": "={{ $json.callback_auth_header }}"
+}
+```
+
+Headers for execute-agent:
+
+| Header | Value |
+|--------|--------|
+| `Content-Type` | `application/json` |
+| `X-API-Key` | `ORCHESTRATOR_API_TOKEN` |
+
+### Example status callback (orchestrator → CRM)
+
+```json
+{
+  "task_id": "232",
+  "project_id": "99",
+  "status": "running",
+  "n8n_status": "running",
+  "run_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "orchestrator_job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "message": "Agent started",
+  "progress": 10
+}
+```
+
+### Example task-log callback
+
+```json
+{
+  "task_id": "workspace_agent_12",
+  "project_id": "41",
+  "run_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "step_key": "log_1717939200123",
+  "title": "Agent Output",
+  "message": "Cloning repository...",
+  "log_message": "Cloning repository...",
+  "status": "completed"
+}
+```
+
 ## Typical backclub.it flow
 
 ### 1. Register project
@@ -230,7 +359,7 @@ Detail includes `quality_checklist`, `output_expectations`, `forbidden_actions`.
 |----------|-------------|
 | `ORCHESTRATOR_API_TOKEN` | Inbound API auth |
 | `REQUIRE_API_TOKEN` | Enforce token on job creation |
-| `WEBHOOK_SECRET` | HMAC for outbound callbacks |
+| `WEBHOOK_SECRET` | HMAC (`X-Orchestrator-Signature`) for outbound callbacks |
 | `CURSOR_API_KEY` | Agent execution (file or dashboard Settings) |
 | `AGENT_ENV_PATH` | Override path to agent.env (default `/opt/agent-orchestrator/config/agent.env`) |
 | `CORS_ORIGINS` | Include `https://backclub.it` |
@@ -269,6 +398,36 @@ When `REQUIRE_API_TOKEN=true`, send `Authorization: Bearer <ORCHESTRATOR_API_TOK
 **Hot reload:** the key is written to `agent.env`. The next job reads it from disk when spawning Docker agent containers. Running jobs keep the key they started with. No VPS or `orchestrator-api` restart is required.
 
 `GET /health` also includes `cursor_api_key` status.
+
+## VPS deploy (2.24.15.210)
+
+From the orchestrator repo on the VPS (`/opt/orch-cloud`):
+
+```bash
+cd /opt/orch-cloud
+./deploy.sh
+```
+
+Ensure `.env` includes:
+
+```env
+ORCHESTRATOR_API_TOKEN=<shared-with-n8n>
+REQUIRE_API_TOKEN=true
+WEBHOOK_SECRET=<optional-hmac-secret>
+CORS_ORIGINS=https://backclub.it,https://www.backclub.it
+```
+
+Verify after deploy:
+
+```bash
+curl -s -o /dev/null -w "HTTP %{http_code}\n" \
+  -X POST http://127.0.0.1:8000/api/v1/execute-agent \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ORCHESTRATOR_API_TOKEN" \
+  -d '{"dedicated_prompt":"ping","github_url":"https://github.com/BackSoftwareJR/villa_sole","task_id":"1","callback_status_url":"https://backclub.it/api/webhooks/n8n/status","callback_auth_header":"authbs","crm_auth_token":"test"}'
+```
+
+Services: `orchestrator-api` (port 8000), `orchestrator-dashboard` (port 3000).
 
 ## Roadmap: backclub.it workspace
 

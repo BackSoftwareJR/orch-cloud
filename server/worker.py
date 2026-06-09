@@ -15,7 +15,13 @@ from server.database import SessionLocal
 from server.job_service import add_system_message, record_job_outcome
 from server.models import Job, JobStatus, Project
 from server.orchestrator import build_command, job_log_path, write_log_header
-from server.webhook_callback import build_callback_payload, notify_job_finished_with_payload
+from server.webhook_callback import (
+    build_callback_payload,
+    notify_job_finished_with_payload,
+    schedule_crm_completed,
+    schedule_crm_log_line,
+    schedule_crm_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +78,7 @@ async def _run_subprocess(
     preset: str,
     model: str | None,
     log_path_str: str,
+    job_metadata: dict | None,
 ) -> None:
     log_path = job_log_path(job_id)
     cmd = build_command(repo_url, task, level, preset, model=model)
@@ -97,6 +104,8 @@ async def _run_subprocess(
                     log_file.write(line)
                     log_file.flush()
                     _handle_log_line(db, job_id, line)
+                    if job_metadata:
+                        schedule_crm_log_line(job_id, job_metadata, line)
                 exit_code = await proc.wait()
                 log_file.write(f"\n\nExit code: {exit_code}\n")
             db.commit()
@@ -144,6 +153,17 @@ async def _run_subprocess(
                 url = settings.get("webhook_url")
                 if isinstance(url, str) and url.strip():
                     webhook_payload = (url.strip(), build_callback_payload(job, project))
+            schedule_crm_status(
+                job,
+                message=(
+                    "Agent completed successfully"
+                    if job.status == JobStatus.COMPLETED
+                    else (job.error_message or f"Agent {job.status.value.lower()}")
+                ),
+                progress=100 if job.status == JobStatus.COMPLETED else None,
+            )
+            if job.status in {JobStatus.COMPLETED, JobStatus.FAILED}:
+                schedule_crm_completed(job)
             db.commit()
             if webhook_payload is not None:
                 url, payload = webhook_payload
@@ -174,6 +194,7 @@ async def _dispatch_job(job: Job) -> None:
         db_job.status = JobStatus.RUNNING
         db_job.started_at = _utcnow()
         db_job.logs_path = log_path_str
+        schedule_crm_status(db_job, message="Agent started", progress=10)
         db.commit()
 
         repo_url = project.repo_url
@@ -182,6 +203,7 @@ async def _dispatch_job(job: Job) -> None:
         preset = AgentPreset.to_value(db_job.preset)
         model = db_job.model
         job_id = db_job.job_id
+        job_metadata = dict(db_job.metadata_ or {})
     finally:
         db.close()
 
@@ -194,7 +216,16 @@ async def _dispatch_job(job: Job) -> None:
     )
     _running_job_ids.add(job_id)
     asyncio.create_task(
-        _run_subprocess(job_id, repo_url, task, level, preset, model, log_path_str)
+        _run_subprocess(
+            job_id,
+            repo_url,
+            task,
+            level,
+            preset,
+            model,
+            log_path_str,
+            job_metadata,
+        )
     )
 
 

@@ -32,6 +32,12 @@ def _execute_payload(**overrides: object) -> dict:
         "website_url": "https://villa-sole.example.com",
         "crm_log_url": "https://crm.example.com/logs/232",
         "crm_auth_token": "crm-secret-token",
+        "callback_url": "https://crm.example.com/api/webhooks/n8n/task-events",
+        "callback_status_url": "https://crm.example.com/api/webhooks/n8n/status",
+        "callback_completed_url": "https://crm.example.com/api/webhooks/n8n/completed",
+        "callback_task_log_url": "https://crm.example.com/api/webhooks/n8n/task-log",
+        "callback_close_task_url": "https://crm.example.com/api/webhooks/n8n/close-task",
+        "callback_auth_header": "authbs",
     }
     base.update(overrides)
     return base
@@ -129,6 +135,53 @@ def test_execute_agent_reuses_project_for_same_github_url(api_client: TestClient
     assert first.status_code == 200
     assert second.status_code == 200
     assert first.json()["project_id"] == second.json()["project_id"]
+
+
+def test_execute_agent_stores_callback_metadata(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/api/v1/execute-agent",
+        json=_execute_payload(task_id="workspace_agent_12"),
+        headers={"X-API-Key": "n8n-test-key"},
+    )
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+
+    from server.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.job_id == run_id).one()
+        assert job.metadata_["crm_task_id"] == "workspace_agent_12"
+        assert job.metadata_["callback_status_url"].endswith("/status")
+        assert job.metadata_["callback_completed_url"].endswith("/completed")
+        assert job.metadata_["callback_task_log_url"].endswith("/task-log")
+        assert job.metadata_["callback_auth_header"] == "authbs"
+    finally:
+        db.close()
+
+
+def test_execute_agent_exact_prompt_preserves_verbatim(api_client: TestClient) -> None:
+    raw_prompt = "  <script>alert(1)</script>\n\n```js\nconst x = 1;\n```  "
+    response = api_client.post(
+        "/api/v1/execute-agent",
+        json=_execute_payload(
+            dedicated_prompt=raw_prompt,
+            exact_prompt=True,
+        ),
+        headers={"X-API-Key": "n8n-test-key"},
+    )
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+
+    from server.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.job_id == run_id).one()
+        assert job.task == raw_prompt
+        assert job.metadata_["exact_prompt"] == "true"
+    finally:
+        db.close()
 
 
 def test_api_usage_stats_after_execute_agent(api_client: TestClient) -> None:

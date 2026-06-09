@@ -18,6 +18,7 @@ from server.orchestrator import job_log_path
 from server.project_service import get_or_create_project_from_github
 from server.schemas import ExecuteAgentRequest, ExecuteAgentResponse
 from server.specialist_roles import resolve_preset_from_specialist_role
+from server.webhook_callback import build_job_metadata_from_execute_agent, schedule_crm_status
 
 router = APIRouter(prefix="/api/v1", tags=["n8n"])
 
@@ -51,19 +52,7 @@ def execute_agent(
     level = resolve_level(preset, "medium").name.lower()
     model = resolve_model(preset, None)
 
-    metadata: dict[str, str] = {}
-    if payload.task_id:
-        metadata["crm_task_id"] = payload.task_id
-    if payload.project_id:
-        metadata["crm_project_id"] = payload.project_id
-    if payload.website_url:
-        metadata["website_url"] = payload.website_url
-    if payload.crm_log_url:
-        metadata["crm_log_url"] = payload.crm_log_url
-    if payload.crm_auth_token:
-        metadata["crm_auth_token"] = payload.crm_auth_token
-    if payload.specialist_role:
-        metadata["specialist_role"] = payload.specialist_role
+    metadata = build_job_metadata_from_execute_agent(payload)
 
     job_uuid = str(uuid.uuid4())
     job = Job(
@@ -94,6 +83,12 @@ def execute_agent(
     )
     db.commit()
     db.refresh(job)
+
+    schedule_crm_status(
+        job,
+        message="Task accepted and queued in orchestrator",
+        progress=0,
+    )
 
     return ExecuteAgentResponse(
         status="accepted",
