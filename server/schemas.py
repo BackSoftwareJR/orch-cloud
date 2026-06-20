@@ -318,6 +318,10 @@ class ExecuteAgentRequest(BaseModel):
         default=None,
         description="Auth header name for CRM callbacks (e.g. authbs)",
     )
+    callback_n8n_proxy_url: str | None = Field(
+        default=None,
+        description="n8n Callback Receiver webhook — CRM callbacks are routed here instead of direct",
+    )
 
     @field_validator(
         "specialist_role",
@@ -332,6 +336,7 @@ class ExecuteAgentRequest(BaseModel):
         "callback_task_log_url",
         "callback_close_task_url",
         "callback_auth_header",
+        "callback_n8n_proxy_url",
         mode="before",
     )
     @classmethod

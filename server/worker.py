@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -18,6 +19,7 @@ from server.orchestrator import build_command, job_log_path, write_log_header
 from server.webhook_callback import (
     build_callback_payload,
     notify_job_finished_with_payload,
+    parse_crm_callbacks,
     schedule_crm_completed,
     schedule_crm_log_line,
     schedule_crm_status,
@@ -26,6 +28,7 @@ from server.webhook_callback import (
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 1.0
+LOG_CALLBACK_INTERVAL_SECONDS = 2.0
 _running_job_ids: set[str] = set()
 _worker_task: asyncio.Task[None] | None = None
 _shutdown_event: asyncio.Event | None = None
@@ -70,6 +73,26 @@ def _handle_log_line(db: Session, job_id: str, line: str) -> None:
     )
 
 
+def _should_emit_log_line(line: str, last_emit_at: float) -> bool:
+    trimmed = line.strip()
+    if not trimmed:
+        return False
+    if time.monotonic() - last_emit_at >= LOG_CALLBACK_INTERVAL_SECONDS:
+        return True
+    lowered = trimmed.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "error",
+            "failed",
+            "exception",
+            "model_switch",
+            "completed",
+            "success",
+        )
+    )
+
+
 async def _run_subprocess(
     job_id: str,
     repo_url: str,
@@ -87,6 +110,7 @@ async def _run_subprocess(
 
     exit_code = -1
     error_message: str | None = None
+    last_log_emit_at = 0.0
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -104,8 +128,9 @@ async def _run_subprocess(
                     log_file.write(line)
                     log_file.flush()
                     _handle_log_line(db, job_id, line)
-                    if job_metadata:
+                    if job_metadata and _should_emit_log_line(line, last_log_emit_at):
                         schedule_crm_log_line(job_id, job_metadata, line)
+                        last_log_emit_at = time.monotonic()
                 exit_code = await proc.wait()
                 log_file.write(f"\n\nExit code: {exit_code}\n")
             db.commit()
@@ -143,16 +168,26 @@ async def _run_subprocess(
                     error_message=job.error_message,
                 )
             project = db.query(Project).filter(Project.id == job.project_id).one_or_none()
-            webhook_payload: tuple[str, dict] | None = None
+            webhook_payload: tuple[str, dict, object | None] | None = None
             if project and job.status in {
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.CANCELLED,
             }:
+                metadata = job.metadata_ or {}
+                crm_log_url = metadata.get("crm_log_url")
                 settings = project.settings or {}
-                url = settings.get("webhook_url")
+                url = (
+                    crm_log_url
+                    if isinstance(crm_log_url, str) and crm_log_url.strip()
+                    else settings.get("webhook_url")
+                )
                 if isinstance(url, str) and url.strip():
-                    webhook_payload = (url.strip(), build_callback_payload(job, project))
+                    webhook_payload = (
+                        url.strip(),
+                        build_callback_payload(job, project),
+                        parse_crm_callbacks(metadata),
+                    )
             schedule_crm_status(
                 job,
                 message=(
@@ -166,8 +201,10 @@ async def _run_subprocess(
                 schedule_crm_completed(job)
             db.commit()
             if webhook_payload is not None:
-                url, payload = webhook_payload
-                asyncio.create_task(notify_job_finished_with_payload(url, payload, job.job_id))
+                url, payload, config = webhook_payload
+                asyncio.create_task(
+                    notify_job_finished_with_payload(url, payload, job.job_id, config)
+                )
         finally:
             db.close()
             _running_job_ids.discard(job_id)

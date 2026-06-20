@@ -75,11 +75,11 @@ Body (JSON) — full CRM + n8n payload:
   "project_id": "99",
   "crm_log_url": "https://backclub.it/api/workspace/agents/12/n8n-callback",
   "crm_auth_token": "your-callback-secret",
-  "callback_url": "https://backclub.it/api/webhooks/n8n/task-events",
-  "callback_status_url": "https://backclub.it/api/webhooks/n8n/status",
-  "callback_completed_url": "https://backclub.it/api/webhooks/n8n/completed",
-  "callback_task_log_url": "https://backclub.it/api/webhooks/n8n/task-log",
-  "callback_close_task_url": "https://backclub.it/api/webhooks/n8n/close-task",
+  "callback_url": "https://backclub.it/backend/public/api/webhooks/n8n/task-events",
+  "callback_status_url": "https://backclub.it/backend/public/api/webhooks/n8n/status",
+  "callback_completed_url": "https://backclub.it/backend/public/api/webhooks/n8n/completed",
+  "callback_task_log_url": "https://backclub.it/backend/public/api/webhooks/n8n/task-log",
+  "callback_close_task_url": "https://backclub.it/backend/public/api/webhooks/n8n/close-task",
   "callback_auth_header": "authbs"
 }
 ```
@@ -238,6 +238,34 @@ When `callback_auth_header` + `crm_auth_token` are in the request, they are sent
 authbs: <crm_auth_token>
 ```
 
+### Route CRM callbacks via n8n (recommended)
+
+Set on the orchestrator VPS (or pass `callback_n8n_proxy_url` from CRM in execute-agent):
+
+```env
+CRM_CALLBACK_N8N_WEBHOOK_URL=https://n8n.srv1691601.hstgr.cloud/webhook/69069118-f267-4a90-b94c-e32003830893
+CRM_CALLBACK_N8N_AUTH_HEADER=authbs
+CRM_CALLBACK_N8N_AUTH_VALUE=your-n8n-token
+```
+
+When configured, the orchestrator POSTs to the n8n **Callback Receiver** webhook instead of calling backclub.it directly. The envelope:
+
+```json
+{
+  "callback_type": "completed",
+  "target_url": "https://backclub.it/backend/public/api/webhooks/n8n/completed",
+  "callback_completed_url": "https://backclub.it/backend/public/api/webhooks/n8n/completed",
+  "callback_auth_header": "authbs",
+  "crm_auth_token": "secret",
+  "task_id": "324",
+  "project_id": "21",
+  "status": "completed",
+  "payload": { "task_id": "324", "status": "completed", "..." : "..." }
+}
+```
+
+The n8n workflow must forward to `target_url` with header `authbs: {{ $json.crm_auth_token }}` and body `{{ $json.payload }}`.
+
 ### n8n HTTP Request node (execute-agent body)
 
 Use this in the n8n node that calls the orchestrator after the webhook switch:
@@ -257,7 +285,8 @@ Use this in the n8n node that calls the orchestrator after the webhook switch:
   "callback_completed_url": "={{ $json.callback_completed_url }}",
   "callback_task_log_url": "={{ $json.callback_task_log_url }}",
   "callback_close_task_url": "={{ $json.callback_close_task_url }}",
-  "callback_auth_header": "={{ $json.callback_auth_header }}"
+  "callback_auth_header": "={{ $json.callback_auth_header }}",
+  "callback_n8n_proxy_url": "={{ $json.callback_n8n_proxy_url }}"
 }
 ```
 

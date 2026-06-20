@@ -13,7 +13,12 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-from server.config import get_webhook_secret
+from server.config import (
+    get_crm_callback_n8n_auth_header,
+    get_crm_callback_n8n_auth_value,
+    get_crm_callback_n8n_webhook_url,
+    get_webhook_secret,
+)
 from server.models import Job, JobStatus, Project
 
 logger = logging.getLogger(__name__)
@@ -42,6 +47,7 @@ METADATA_CALLBACK_KEYS = (
     "callback_close_task_url",
     "callback_auth_header",
     "crm_auth_token",
+    "callback_n8n_proxy_url",
     "exact_prompt",
     "website_url",
     "crm_log_url",
@@ -59,6 +65,7 @@ class CrmCallbackConfig:
     close_task_url: str | None
     auth_header: str | None
     auth_value: str | None
+    n8n_proxy_url: str | None = None
 
 
 def build_job_metadata_from_execute_agent(payload: Any) -> dict[str, str]:
@@ -88,6 +95,8 @@ def build_job_metadata_from_execute_agent(payload: Any) -> dict[str, str]:
         metadata["callback_close_task_url"] = payload.callback_close_task_url
     if payload.callback_auth_header:
         metadata["callback_auth_header"] = payload.callback_auth_header
+    if getattr(payload, "callback_n8n_proxy_url", None):
+        metadata["callback_n8n_proxy_url"] = payload.callback_n8n_proxy_url
     if payload.exact_prompt:
         metadata["exact_prompt"] = "true"
     return metadata
@@ -99,6 +108,7 @@ def parse_crm_callbacks(metadata: dict | None) -> CrmCallbackConfig | None:
     task_id = metadata.get("crm_task_id")
     if not task_id:
         return None
+    proxy_url = _clean_url(metadata.get("callback_n8n_proxy_url")) or get_crm_callback_n8n_webhook_url()
     return CrmCallbackConfig(
         task_id=str(task_id),
         project_id=metadata.get("crm_project_id"),
@@ -109,6 +119,7 @@ def parse_crm_callbacks(metadata: dict | None) -> CrmCallbackConfig | None:
         close_task_url=_clean_url(metadata.get("callback_close_task_url")),
         auth_header=_clean_str(metadata.get("callback_auth_header")),
         auth_value=_clean_str(metadata.get("crm_auth_token")),
+        n8n_proxy_url=proxy_url,
     )
 
 
@@ -146,6 +157,61 @@ def _build_auth_headers(config: CrmCallbackConfig | None, body: bytes) -> dict[s
     return headers
 
 
+def _build_n8n_proxy_auth_config() -> CrmCallbackConfig | None:
+    header = get_crm_callback_n8n_auth_header()
+    value = get_crm_callback_n8n_auth_value()
+    if not header or not value:
+        return None
+    return CrmCallbackConfig(
+        task_id=None,
+        project_id=None,
+        status_url=None,
+        completed_url=None,
+        task_log_url=None,
+        events_url=None,
+        close_task_url=None,
+        auth_header=header,
+        auth_value=value,
+        n8n_proxy_url=None,
+    )
+
+
+def _prepare_crm_delivery(
+    target_url: str,
+    payload: dict[str, Any],
+    config: CrmCallbackConfig | None,
+    callback_type: str,
+) -> tuple[str, dict[str, Any], CrmCallbackConfig | None]:
+    """When n8n proxy is configured, wrap CRM callback for the Callback Receiver workflow."""
+    proxy_url = config.n8n_proxy_url if config else None
+    if not proxy_url:
+        proxy_url = get_crm_callback_n8n_webhook_url()
+    if not proxy_url:
+        return target_url, payload, config
+
+    envelope: dict[str, Any] = {
+        "callback_type": callback_type,
+        "target_url": target_url,
+        "callback_auth_header": config.auth_header if config else None,
+        "crm_auth_token": config.auth_value if config else None,
+        **payload,
+        "payload": payload,
+    }
+    if callback_type == "completed":
+        envelope["callback_completed_url"] = target_url
+    elif callback_type == "status":
+        envelope["callback_status_url"] = target_url
+    elif callback_type == "close-task":
+        envelope["callback_close_task_url"] = target_url
+    elif callback_type == "task-log":
+        envelope["callback_task_log_url"] = target_url
+    elif callback_type == "task-events":
+        envelope["callback_url"] = target_url
+
+    proxy_auth = _build_n8n_proxy_auth_config()
+    return proxy_url, envelope, proxy_auth or config
+
+
 def _post_webhook_sync(
     url: str,
     payload: dict[str, Any],
@@ -162,7 +228,8 @@ def _post_webhook_sync(
 def build_callback_payload(job: Job, project: Project) -> dict[str, Any]:
     event = EVENT_MAP.get(job.status, f"job.{job.status.value.lower()}")
     task_preview = (job.task or "")[:200]
-    return {
+    metadata = job.metadata_ or {}
+    payload: dict[str, Any] = {
         "event": event,
         "job_id": job.job_id,
         "project_id": project.id,
@@ -177,6 +244,11 @@ def build_callback_payload(job: Job, project: Project) -> dict[str, Any]:
         "parent_job_id": job.parent_job_id,
         "thread_root_id": job.thread_root_id,
     }
+    if metadata.get("crm_task_id"):
+        payload["task_id"] = metadata["crm_task_id"]
+    if metadata.get("crm_project_id"):
+        payload["crm_project_id"] = metadata["crm_project_id"]
+    return payload
 
 
 def build_crm_status_payload(
@@ -277,11 +349,33 @@ async def post_crm_callback(
     job_id: str,
     label: str,
 ) -> None:
+    delivery_url, delivery_payload, delivery_config = _prepare_crm_delivery(
+        url, payload, config, label
+    )
+    via_proxy = delivery_url != url
     try:
-        await asyncio.to_thread(_post_webhook_sync, url, payload, config)
-        logger.info("CRM %s callback delivered for job %s → %s", label, job_id[:8], url)
+        await asyncio.to_thread(_post_webhook_sync, delivery_url, delivery_payload, delivery_config)
+        if via_proxy:
+            logger.info(
+                "CRM %s callback proxied via n8n for job %s → %s (target %s)",
+                label,
+                job_id[:8],
+                delivery_url,
+                url,
+            )
+        else:
+            logger.info("CRM %s callback delivered for job %s → %s", label, job_id[:8], url)
     except Exception:
-        logger.exception("CRM %s callback failed for job %s → %s", label, job_id[:8], url)
+        if via_proxy:
+            logger.exception(
+                "CRM %s callback failed via n8n proxy for job %s → %s (target %s)",
+                label,
+                job_id[:8],
+                delivery_url,
+                url,
+            )
+        else:
+            logger.exception("CRM %s callback failed for job %s → %s", label, job_id[:8], url)
 
 
 async def notify_crm_status(
@@ -402,10 +496,11 @@ async def notify_job_finished_with_payload(
     url: str,
     payload: dict[str, Any],
     job_id: str,
+    config: CrmCallbackConfig | None = None,
 ) -> None:
     """Fire-and-forget callback using a pre-built payload (safe after DB session closes)."""
     try:
-        await asyncio.to_thread(_post_webhook_sync, url, payload, None)
+        await asyncio.to_thread(_post_webhook_sync, url, payload, config)
         logger.info("Webhook delivered for job %s → %s", job_id[:8], url)
     except Exception:
         logger.exception("Webhook delivery failed for job %s → %s", job_id[:8], url)
@@ -413,24 +508,30 @@ async def notify_job_finished_with_payload(
 
 async def notify_job_finished(job: Job, project: Project) -> None:
     """Fire-and-forget callback when a job reaches a terminal state."""
-    url = _resolve_webhook_url(project)
+    metadata = job.metadata_ or {}
+    crm_log_url = metadata.get("crm_log_url")
+    url = crm_log_url if isinstance(crm_log_url, str) and crm_log_url.strip() else _resolve_webhook_url(project)
     if not url:
         return
     if job.status not in EVENT_MAP:
         return
 
+    config = parse_crm_callbacks(metadata)
     payload = build_callback_payload(job, project)
-    await notify_job_finished_with_payload(url, payload, job.job_id)
+    await notify_job_finished_with_payload(url.strip(), payload, job.job_id, config)
 
 
 def schedule_job_webhook(job: Job, project: Project) -> None:
     """Schedule async webhook from sync worker context."""
-    url = _resolve_webhook_url(project)
+    metadata = job.metadata_ or {}
+    crm_log_url = metadata.get("crm_log_url")
+    url = crm_log_url if isinstance(crm_log_url, str) and crm_log_url.strip() else _resolve_webhook_url(project)
     if not url or job.status not in EVENT_MAP:
         return
+    config = parse_crm_callbacks(metadata)
     payload = build_callback_payload(job, project)
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(notify_job_finished_with_payload(url, payload, job.job_id))
+        loop.create_task(notify_job_finished_with_payload(url.strip(), payload, job.job_id, config))
     except RuntimeError:
-        asyncio.run(notify_job_finished_with_payload(url, payload, job.job_id))
+        asyncio.run(notify_job_finished_with_payload(url.strip(), payload, job.job_id, config))

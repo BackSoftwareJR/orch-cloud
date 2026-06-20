@@ -42,6 +42,22 @@ def get_webhook_secret() -> str | None:
     return value or None
 
 
+def get_crm_callback_n8n_webhook_url() -> str | None:
+    """n8n webhook that forwards CRM callbacks (Callback Receiver workflow)."""
+    value = os.environ.get("CRM_CALLBACK_N8N_WEBHOOK_URL", "").strip()
+    return value or None
+
+
+def get_crm_callback_n8n_auth_header() -> str | None:
+    value = os.environ.get("CRM_CALLBACK_N8N_AUTH_HEADER", "").strip()
+    return value or None
+
+
+def get_crm_callback_n8n_auth_value() -> str | None:
+    value = os.environ.get("CRM_CALLBACK_N8N_AUTH_VALUE", "").strip()
+    return value or None
+
+
 def get_cors_origins() -> list[str]:
     raw = os.environ.get(
         "CORS_ORIGINS",

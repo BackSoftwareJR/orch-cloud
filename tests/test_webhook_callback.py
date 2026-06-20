@@ -9,6 +9,7 @@ from server.webhook_callback import (
     build_crm_status_payload,
     build_job_metadata_from_execute_agent,
     parse_crm_callbacks,
+    _prepare_crm_delivery,
 )
 from server.schemas import ExecuteAgentRequest
 
@@ -111,3 +112,43 @@ def test_build_crm_log_payload() -> None:
     assert payload["task_id"] == "232"
     assert payload["message"] == "  hello world"
     assert payload["log_message"] == "  hello world"
+
+
+def test_prepare_crm_delivery_via_n8n_proxy(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "CRM_CALLBACK_N8N_WEBHOOK_URL",
+        "https://n8n.example.com/webhook/callback-receiver",
+    )
+    config = parse_crm_callbacks(_sample_metadata())
+    assert config is not None
+    crm_payload = {"task_id": "232", "status": "completed", "project_id": "41"}
+    delivery_url, envelope, _ = _prepare_crm_delivery(
+        "https://crm.example.com/api/webhooks/n8n/completed",
+        crm_payload,
+        config,
+        "completed",
+    )
+    assert delivery_url == "https://n8n.example.com/webhook/callback-receiver"
+    assert envelope["callback_type"] == "completed"
+    assert envelope["target_url"].endswith("/completed")
+    assert envelope["callback_completed_url"].endswith("/completed")
+    assert envelope["crm_auth_token"] == "secret-token"
+    assert envelope["payload"]["status"] == "completed"
+
+
+def test_prepare_crm_delivery_direct_without_proxy(monkeypatch) -> None:
+    monkeypatch.delenv("CRM_CALLBACK_N8N_WEBHOOK_URL", raising=False)
+    metadata = {k: v for k, v in _sample_metadata().items() if k != "callback_n8n_proxy_url"}
+    config = parse_crm_callbacks(metadata)
+    assert config is not None
+    assert config.n8n_proxy_url is None
+    crm_payload = {"task_id": "232", "status": "running"}
+    delivery_url, envelope, delivery_config = _prepare_crm_delivery(
+        "https://crm.example.com/api/webhooks/n8n/status",
+        crm_payload,
+        config,
+        "status",
+    )
+    assert delivery_url.endswith("/status")
+    assert envelope == crm_payload
+    assert delivery_config is config
