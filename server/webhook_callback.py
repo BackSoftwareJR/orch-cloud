@@ -124,9 +124,14 @@ def parse_crm_callbacks(metadata: dict | None) -> CrmCallbackConfig | None:
 
 
 def _clean_url(value: object) -> str | None:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned == "=":
+        return None
+    if not cleaned.startswith(("http://", "https://")):
+        return None
+    return cleaned
 
 
 def _clean_str(value: object) -> str | None:
@@ -293,6 +298,7 @@ def build_crm_completed_payload(job: Job) -> dict[str, Any]:
     if job.error_message:
         payload["error"] = job.error_message
     if succeeded:
+        payload["progress"] = 100
         payload["result"] = {
             "job_id": job.job_id,
             "log_path": job.logs_path,

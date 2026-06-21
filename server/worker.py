@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 1.0
 LOG_CALLBACK_INTERVAL_SECONDS = 2.0
+PROGRESS_UPDATE_INTERVAL_SECONDS = 30.0
+PROGRESS_RAMP_SECONDS = 600.0  # reach 90% after ~10 minutes
 _running_job_ids: set[str] = set()
 _worker_task: asyncio.Task[None] | None = None
 _shutdown_event: asyncio.Event | None = None
@@ -93,6 +95,37 @@ def _should_emit_log_line(line: str, last_emit_at: float) -> bool:
     )
 
 
+async def _periodic_crm_progress(
+    job_id: str,
+    job_metadata: dict,
+    stop_event: asyncio.Event,
+) -> None:
+    """Send a progress % update to the CRM every 30 s while the job is running."""
+    elapsed = 0.0
+    while True:
+        try:
+            await asyncio.wait_for(asyncio.shield(stop_event.wait()), timeout=PROGRESS_UPDATE_INTERVAL_SECONDS)
+            return
+        except asyncio.TimeoutError:
+            pass
+        elapsed += PROGRESS_UPDATE_INTERVAL_SECONDS
+        progress = min(10 + int(elapsed / PROGRESS_RAMP_SECONDS * 80), 90)
+        db = SessionLocal()
+        try:
+            job = db.query(Job).filter(Job.job_id == job_id).one_or_none()
+            if job is None or job.status != JobStatus.RUNNING:
+                return
+            schedule_crm_status(
+                job,
+                message=f"Agente in lavorazione... ({int(elapsed)}s)",
+                progress=progress,
+            )
+        except Exception:
+            logger.exception("Periodic CRM progress update failed for job %s", job_id)
+        finally:
+            db.close()
+
+
 async def _run_subprocess(
     job_id: str,
     repo_url: str,
@@ -111,6 +144,13 @@ async def _run_subprocess(
     exit_code = -1
     error_message: str | None = None
     last_log_emit_at = 0.0
+
+    _progress_stop = asyncio.Event()
+    _progress_task: asyncio.Task[None] | None = None
+    if job_metadata:
+        _progress_task = asyncio.create_task(
+            _periodic_crm_progress(job_id, job_metadata, _progress_stop)
+        )
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -142,6 +182,12 @@ async def _run_subprocess(
         with log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(f"\nException: {exc}\n")
     finally:
+        _progress_stop.set()
+        if _progress_task is not None:
+            try:
+                await asyncio.wait_for(_progress_task, timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
         db = SessionLocal()
         try:
             job = db.query(Job).filter(Job.job_id == job_id).one_or_none()

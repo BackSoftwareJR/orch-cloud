@@ -88,6 +88,7 @@ def test_build_crm_completed_payload_success() -> None:
     )
     payload = build_crm_completed_payload(job)
     assert payload["status"] == "completed"
+    assert payload["progress"] == 100
     assert payload["result"]["job_id"] == "run-uuid-2"
 
 
