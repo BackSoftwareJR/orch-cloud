@@ -28,9 +28,12 @@ from server.webhook_callback import (
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 1.0
-LOG_CALLBACK_INTERVAL_SECONDS = 2.0
-PROGRESS_UPDATE_INTERVAL_SECONDS = 30.0
-PROGRESS_RAMP_SECONDS = 600.0  # reach 90% after ~10 minutes
+LOG_CALLBACK_INTERVAL_SECONDS = 60.0   # max 1 log-line callback per minute
+PROGRESS_RAMP_SECONDS = 600.0          # reach ~90% after ~10 minutes
+
+# Progress callbacks only when crossing these thresholds (10% sent at job start)
+PROGRESS_MILESTONES = (10, 25, 50, 75)
+
 _running_job_ids: set[str] = set()
 _worker_task: asyncio.Task[None] | None = None
 _shutdown_event: asyncio.Event | None = None
@@ -76,23 +79,19 @@ def _handle_log_line(db: Session, job_id: str, line: str) -> None:
 
 
 def _should_emit_log_line(line: str, last_emit_at: float) -> bool:
+    """Only send log callbacks for critical events, or at most once per minute."""
     trimmed = line.strip()
     if not trimmed:
         return False
-    if time.monotonic() - last_emit_at >= LOG_CALLBACK_INTERVAL_SECONDS:
-        return True
     lowered = trimmed.lower()
-    return any(
+    # Always forward critical events immediately
+    if any(
         marker in lowered
-        for marker in (
-            "error",
-            "failed",
-            "exception",
-            "model_switch",
-            "completed",
-            "success",
-        )
-    )
+        for marker in ("error", "failed", "exception", "model_switch", "completed", "success")
+    ):
+        return True
+    # Normal output: max 1 callback per minute
+    return time.monotonic() - last_emit_at >= LOG_CALLBACK_INTERVAL_SECONDS
 
 
 async def _periodic_crm_progress(
@@ -100,16 +99,36 @@ async def _periodic_crm_progress(
     job_metadata: dict,
     stop_event: asyncio.Event,
 ) -> None:
-    """Send a progress % update to the CRM every 30 s while the job is running."""
+    """Send CRM progress ONLY at milestone thresholds: 25% → 50% → 75%.
+    (10% is already sent at job start; 100% is sent at completion.)
+    Polls every 5 s internally but fires an HTTP call only when a new milestone is crossed."""
+    POLL_TICK = 5.0
     elapsed = 0.0
+    last_sent_milestone = 10  # 10% already sent at dispatch
+
     while True:
         try:
-            await asyncio.wait_for(asyncio.shield(stop_event.wait()), timeout=PROGRESS_UPDATE_INTERVAL_SECONDS)
-            return
+            await asyncio.wait_for(asyncio.shield(stop_event.wait()), timeout=POLL_TICK)
+            return  # job finished — 100% is sent by the caller
         except asyncio.TimeoutError:
             pass
-        elapsed += PROGRESS_UPDATE_INTERVAL_SECONDS
-        progress = min(10 + int(elapsed / PROGRESS_RAMP_SECONDS * 80), 90)
+
+        elapsed += POLL_TICK
+        current = min(10 + int(elapsed / PROGRESS_RAMP_SECONDS * 80), 90)
+
+        # Find the highest milestone crossed that hasn't been sent yet
+        next_milestone: int | None = None
+        for m in PROGRESS_MILESTONES:
+            if m <= last_sent_milestone:
+                continue
+            if current >= m:
+                next_milestone = m
+
+        if next_milestone is None:
+            continue
+
+        last_sent_milestone = next_milestone
+
         db = SessionLocal()
         try:
             job = db.query(Job).filter(Job.job_id == job_id).one_or_none()
@@ -117,9 +136,10 @@ async def _periodic_crm_progress(
                 return
             schedule_crm_status(
                 job,
-                message=f"Agente in lavorazione... ({int(elapsed)}s)",
-                progress=progress,
+                message=f"Agente in lavorazione... {next_milestone}%",
+                progress=next_milestone,
             )
+            logger.info("Progress milestone %d%% sent for job %s", next_milestone, job_id[:8])
         except Exception:
             logger.exception("Periodic CRM progress update failed for job %s", job_id)
         finally:
